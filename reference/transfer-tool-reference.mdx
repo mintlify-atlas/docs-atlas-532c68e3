@@ -146,7 +146,7 @@ Both checks throw `payload_too_large` (HTTP 413) on failure.
 
 Base64 encoding expands binary data by approximately **4/3** (33%). A `MAX_TRANSFER_BYTES` value of 1 MiB (1,048,576 bytes) allows a maximum encoded string of approximately 1.33 MiB (1,398,104 characters).
 
-```
+```text
 max_base64_chars = ceil(MAX_TRANSFER_BYTES / 3) * 4
 ```
 

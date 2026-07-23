@@ -1,5 +1,5 @@
 ---
-title: "Environment Variables Reference for R2 MCP Worker"
+title: "Environment Variables Reference for the R2 MCP Worker"
 sidebarTitle: "Environment Variables"
 description: "Full reference for every R2 MCP Worker env var: defaults, accepted values, when each is required, and which must be stored as encrypted Wrangler secrets."
 ---
@@ -121,39 +121,39 @@ All configuration for the R2 MCP Worker is driven by environment variables. Non-
 
 ---
 
-## Secrets — Cloudflare API
+## Cloudflare API
 
 <ParamField query="CLOUDFLARE_ACCOUNT_ID" type="string">
-  Your Cloudflare account ID. Found in the Cloudflare dashboard URL or under **Account Home → Overview**.
+  Your Cloudflare account ID. Found in the Cloudflare dashboard URL or under **Account Home → Overview**. This is not a secret — set it under `vars` in `wrangler.jsonc`.
 
   Required when `ENABLE_ACCOUNT_TOOLS=true`. Also used to derive the R2 S3-compatible endpoint when `R2_S3_ENDPOINT` is not explicitly set:
   `https://<account-id>.r2.cloudflarestorage.com`
 </ParamField>
 
 <ParamField query="CLOUDFLARE_API_TOKEN" type="string">
-  A Cloudflare API token with read-only R2 scope. Create one at **My Profile → API Tokens → Create Token** using the **R2:Read** permission template.
+  A Cloudflare API token with read-only R2 scope. Create one at **My Profile → API Tokens → Create Token** using the **R2:Read** permission template. Store as a Wrangler secret — never place it under `vars`.
 
   Required when `ENABLE_ACCOUNT_TOOLS=true`.
 </ParamField>
 
 ---
 
-## Secrets — R2 S3 / Presign
+## R2 S3 / Presign
 
 <ParamField query="R2_ACCESS_KEY_ID" type="string">
-  R2 access key ID for the S3-compatible API. Generated in the Cloudflare dashboard under **R2 → Manage R2 API Tokens**.
+  R2 access key ID for the S3-compatible API. Generated in the Cloudflare dashboard under **R2 → Manage R2 API Tokens**. Store as a Wrangler secret — never place it under `vars`.
 
   Required when `ENABLE_PRESIGN_TOOLS=true`.
 </ParamField>
 
 <ParamField query="R2_SECRET_ACCESS_KEY" type="string">
-  R2 secret access key corresponding to `R2_ACCESS_KEY_ID`. Shown only once at creation time — store it immediately.
+  R2 secret access key corresponding to `R2_ACCESS_KEY_ID`. Shown only once at creation time — store it immediately as a Wrangler secret.
 
   Required when `ENABLE_PRESIGN_TOOLS=true`.
 </ParamField>
 
 <ParamField query="R2_S3_ENDPOINT" type="string">
-  The S3-compatible endpoint URL for your R2 bucket. If omitted, the Worker derives it automatically from `CLOUDFLARE_ACCOUNT_ID`:
+  The S3-compatible endpoint URL for your R2 bucket. Not a secret — set it under `vars` in `wrangler.jsonc`. If omitted, the Worker derives it automatically from `CLOUDFLARE_ACCOUNT_ID`:
 
   ```text
   https://<account-id>.r2.cloudflarestorage.com
@@ -163,9 +163,19 @@ All configuration for the R2 MCP Worker is driven by environment variables. Non-
 </ParamField>
 
 <ParamField query="R2_S3_REGION" type="string" default="auto">
-  The region string passed to the S3 client. R2 uses `"auto"` as its canonical region identifier.
+  The region string passed to the S3 client. R2 uses `"auto"` as its canonical region identifier. Not a secret — set it under `vars` in `wrangler.jsonc`.
 
   Only change this if your S3-client tooling requires a different value for compatibility reasons.
+</ParamField>
+
+---
+
+## R2 Bucket Binding
+
+<ParamField query="R2_BUCKET" type="R2Bucket" required>
+  The bound R2 bucket. Declared in the `r2_buckets` array in `wrangler.jsonc` with `"binding": "R2_BUCKET"`. The Worker accesses all R2 objects through this binding — it is the primary interface for every object read, write, delete, and list operation.
+
+  This is a Cloudflare binding, not an environment variable string. It cannot be set in `vars` or as a Wrangler secret. It is wired up by the `r2_buckets` binding configuration and is always required for the Worker to function.
 </ParamField>
 
 ---
@@ -184,6 +194,7 @@ All configuration for the R2 MCP Worker is driven by environment variables. Non-
 
 | Variable | Type | Required | Default |
 |---|---|---|---|
+| `R2_BUCKET` | `R2Bucket` binding | Always | — |
 | `AUTH_MODE` | `string` | Optional | `"github"` |
 | `ALLOWED_GITHUB_LOGINS` | `string` | When `AUTH_MODE=github` | — |
 | `R2_BUCKET_NAME` | `string` | For admin + presign tools | — |

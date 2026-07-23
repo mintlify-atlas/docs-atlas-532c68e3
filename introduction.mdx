@@ -46,7 +46,7 @@ The Worker exposes three independent credential surfaces. Each controls a distin
     Full object lifecycle: list, head, get, put, delete, copy, move, and rename inside the bound bucket. Destructive operations require `confirm: true`.
   </Card>
   <Card title="Base64 Transfer Tools" icon="arrows-up-down">
-    Upload and download binary or text objects encoded as base64, up to the configurable `MAX_TRANSFER_BYTES` limit (default 1 MB).
+    Upload and download binary or text objects encoded as base64 via `r2_upload_base64` and `r2_download_base64`, up to the configurable `MAX_TRANSFER_BYTES` limit (default 1 MB).
   </Card>
   <Card title="Optional Account Tools" icon="chart-bar">
     Read-only bucket and account metadata tools, enabled with `ENABLE_ACCOUNT_TOOLS=true`. Requires a Cloudflare API token.
@@ -68,8 +68,8 @@ The Worker exposes three independent credential surfaces. Each controls a distin
 
 The following tools are registered on every deployment without any additional configuration:
 
-- **Object tools** — `r2_object_list`, `r2_object_head`, `r2_object_get`, `r2_object_put`, `r2_object_delete`, `r2_object_copy`, `r2_object_move`, `r2_object_rename`
-- **Base64 tools** — `r2_object_upload_base64`, `r2_object_download_base64`
+- **Object tools** — `r2_object_list`, `r2_object_head`, `r2_object_get`, `r2_object_put`, `r2_object_put_if_absent`, `r2_object_delete`, `r2_object_delete_many`, `r2_object_copy`, `r2_object_move`, `r2_object_rename`
+- **Base64 tools** — `r2_upload_base64`, `r2_download_base64`
 
 ### Optional tools
 

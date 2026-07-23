@@ -35,7 +35,7 @@ curl http://localhost:8787/healthz
 curl https://<worker-url>/healthz
 ```
 
-**Expected response:**
+**Expected response (healthy):**
 
 ```json
 {
@@ -53,7 +53,17 @@ curl https://<worker-url>/healthz
 
 The values of `authMode`, `accountToolsEnabled`, `presignToolsEnabled`, and `rootPrefix` reflect your `wrangler.jsonc` configuration and may differ from the example above.
 
-If `ok` is `false`, the R2 bucket binding is missing from `wrangler.jsonc` or the bucket name is wrong. Check that `R2_BUCKET` is bound and that the bucket was created before deployment.
+**Error response (bucket unreachable):**
+
+```json
+{
+  "ok": false,
+  "bucketAccessible": false,
+  "error": "<error message>"
+}
+```
+
+If `ok` is `false`, the R2 bucket binding is missing from `wrangler.jsonc` or the bucket name is wrong. Check that `R2_BUCKET` is bound and that the bucket was created before deployment. The `/healthz` endpoint returns HTTP `503` when the bucket is unreachable.
 
 ## MCP tools/list via MCP Inspector
 

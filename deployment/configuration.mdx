@@ -56,15 +56,15 @@ Secrets are stored outside `wrangler.jsonc` and pushed to Cloudflare with `npx w
   ```
 </Tip>
 
-## Optional S3 / presign variables
+## Optional account and presign variables
 
-These variables are only read when `ENABLE_PRESIGN_TOOLS=true`.
+`CLOUDFLARE_ACCOUNT_ID` is required by both account tools (`ENABLE_ACCOUNT_TOOLS=true`) and presign tools (`ENABLE_PRESIGN_TOOLS=true`). `R2_S3_ENDPOINT` and `R2_S3_REGION` are only used when `ENABLE_PRESIGN_TOOLS=true`.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `R2_S3_ENDPOINT` | `string` | Derived from `CLOUDFLARE_ACCOUNT_ID` | Full S3-compatible endpoint URL for R2. If omitted, the Worker derives it as `https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com`. |
-| `R2_S3_REGION` | `string` | `"auto"` | S3 region string passed to the AWS SDK when generating presigned URLs. Cloudflare R2 accepts `"auto"`. |
-| `CLOUDFLARE_ACCOUNT_ID` | `string` | — | Your Cloudflare account ID. Used to derive `R2_S3_ENDPOINT` when that variable is not set explicitly, and required by account tools. |
+| `CLOUDFLARE_ACCOUNT_ID` | `string` | — | Your Cloudflare account ID. Required by account tools and used to derive `R2_S3_ENDPOINT` for presign tools when that variable is not set explicitly. |
+| `R2_S3_ENDPOINT` | `string` | Derived from `CLOUDFLARE_ACCOUNT_ID` | Full S3-compatible endpoint URL for R2. If omitted, the Worker derives it as `https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com`. Only used when `ENABLE_PRESIGN_TOOLS=true`. |
+| `R2_S3_REGION` | `string` | `"auto"` | S3 region string passed to the AWS SDK when generating presigned URLs. Cloudflare R2 accepts `"auto"`. Only used when `ENABLE_PRESIGN_TOOLS=true`. |
 
 ## Full wrangler.example.jsonc
 

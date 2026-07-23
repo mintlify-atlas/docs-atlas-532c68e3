@@ -1,5 +1,5 @@
 ---
-title: "Set Up GitHub OAuth for R2 MCP Worker Access"
+title: "Configure GitHub OAuth Access for the R2 MCP Worker"
 sidebarTitle: "GitHub OAuth"
 description: "Step-by-step guide to creating a GitHub OAuth App, configuring Worker secrets, setting the allowlist, and provisioning the KV namespace."
 ---
@@ -114,7 +114,11 @@ The first time an MCP client connects, the Worker renders an HTML approval dialo
 - The connecting MCP client's name and, if registered, its client URI
 - **Approve** and **Cancel** buttons
 
-The form is CSRF-protected using a `__Host-CSRF_TOKEN` cookie that is verified server-side before the redirect to GitHub proceeds. Once a client is approved, that approval is stored in a signed `__Host-APPROVED_CLIENTS` cookie so the dialog is not shown again for the same client on the same browser.
+Three cookies are used across the approval and callback steps:
+
+- **`__Host-CSRF_TOKEN`** — set when the approval dialog is rendered, verified when the form is submitted, then cleared. Prevents cross-site request forgery on the approval POST.
+- **`__Host-CONSENTED_STATE`** — set after the user approves the client, binding the OAuth state token to the browser session. Verified at the `/callback` step to ensure the callback originates from the same browser that initiated the flow, then cleared.
+- **`__Host-APPROVED_CLIENTS`** — set after a successful approval. HMAC-SHA256 signed using `COOKIE_ENCRYPTION_KEY`. Persists client approval so the dialog is not shown again on subsequent connections from the same browser.
 
 ## Failure Modes
 

@@ -1,7 +1,7 @@
 ---
 title: "Wrangler Configuration Reference for R2 MCP Worker"
 sidebarTitle: "Wrangler Config"
-description: "Complete reference for wrangler.jsonc structure, R2 and KV bindings, secrets vs vars, Worker naming, and multi-environment deployment for the R2 MCP Worker."
+description: "Complete reference for wrangler.jsonc: R2 and KV bindings, secrets vs vars, Worker naming, compatibility settings, and multi-environment deployment."
 ---
 
 The Worker is configured via `wrangler.jsonc` (or `wrangler.json`). This file tells Wrangler how to build, bind, and deploy the Worker: it declares the R2 bucket binding, the KV namespace for OAuth state, non-sensitive environment variables, and runtime compatibility settings. Sensitive credentials are kept out of this file entirely and are managed as encrypted Wrangler secrets. This page documents the required structure, all supported fields, and how to manage the config file throughout the development and deployment lifecycle.

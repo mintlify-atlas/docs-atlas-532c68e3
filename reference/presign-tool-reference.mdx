@@ -1,7 +1,7 @@
 ---
 title: "Presign Tool Reference: Temporary S3 URL Generation"
 sidebarTitle: "Presign Tools"
-description: "Complete parameter and return-type reference for r2_presign_get and r2_presign_put, including expiry range, S3 client configuration, and required environment variables."
+description: "Complete parameter and return-type reference for r2_presign_get and r2_presign_put, including expiry range and S3 credential configuration."
 ---
 
 This page is the complete parameter and return-type reference for `r2_presign_get` and `r2_presign_put`. Both tools generate temporary presigned S3-compatible URLs for Cloudflare R2 objects, allowing clients to upload or download directly without routing through the MCP worker.
@@ -106,7 +106,7 @@ Generate a presigned PUT URL for a single R2 object. The URL allows a client to 
 
 The `expiresInSeconds` validation is enforced by the `expiresIn` helper in `src/r2/presign.ts` before the S3 client is constructed. An out-of-range value raises `invalid_expiration` (HTTP 400).
 
-```
+```text
 1 second  ≤  expiresInSeconds  ≤  604800 seconds (7 days)
 default = 3600 seconds (1 hour)
 ```

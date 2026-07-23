@@ -100,6 +100,16 @@ This page covers common failure scenarios you may encounter during deployment, a
     - Re-fetch the object metadata using `r2_object_head` to get the current ETag, then retry the put with the updated value or omit `expectedEtag` if conditional writes are not required.
   </Accordion>
 
+  <Accordion title="object_already_exists (409) on put_if_absent">
+    An `r2_object_put_if_absent` call returns a `409 Conflict` with an `object_already_exists` error code.
+
+    **Possible causes:**
+
+    - An object already exists at the given key. The `r2_object_put_if_absent` tool performs a conditional write that fails if the key is already occupied — it is designed to prevent accidental overwrites.
+    - If overwriting the existing object is acceptable, use `r2_object_put` instead.
+    - If you want to write only if the object is absent and also obtain the current object's content when it already exists, call `r2_object_get` first, then decide whether to write based on the result.
+  </Accordion>
+
   <Accordion title="destination_exists (409) on copy or move">
     An `r2_object_copy` or `r2_object_move` call returns a `409 Conflict` with a `destination_exists` error code.
 
@@ -107,6 +117,26 @@ This page covers common failure scenarios you may encounter during deployment, a
 
     - An object already exists at the destination key and `allowOverwrite` was not set to `true` in the tool call.
     - Set `allowOverwrite: true` in the tool arguments to permit the overwrite, or choose a different destination key.
+  </Accordion>
+
+  <Accordion title="no_op_rename (400) on rename">
+    An `r2_object_rename` call returns a `400 Bad Request` with a `no_op_rename` error code.
+
+    **Possible causes:**
+
+    - The new name provided is identical to the current object name. The Worker rejects renames that would result in no change.
+    - Verify that the `newName` argument differs from the current basename of the object key.
+  </Accordion>
+
+  <Accordion title="invalid_path (400) on any tool">
+    A tool call returns a `400 Bad Request` with an `invalid_path` error code.
+
+    **Possible causes:**
+
+    - The key or path argument is empty, an absolute path (starts with `/`), or contains a Windows-style drive letter (e.g. `C:\`).
+    - The path contains `.` or `..` segments, or includes null bytes.
+    - For `r2_object_rename`, the `newName` argument is empty, contains a path separator, or is otherwise not a valid basename.
+    - Provide a relative path with no special segments. Paths must be non-empty strings using only forward slashes as separators.
   </Accordion>
 
 </AccordionGroup>

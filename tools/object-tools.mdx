@@ -167,8 +167,8 @@ Deletes one object from the bound R2 bucket. The `confirm: true` field is requir
   The object key to delete, relative to `R2_ROOT_PREFIX` when set.
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
-  Must be `true`. Required guard against accidental deletion.
+<ParamField query="confirm" type="true (literal)" required>
+  Must be the literal value `true`. Required guard against accidental deletion.
 </ParamField>
 
 **Returns:** `{ deleted: true, key: string }`
@@ -192,8 +192,8 @@ Deletes multiple objects from the bound R2 bucket in a single call. Accepts betw
   Array of object keys to delete (1 to `MAX_LIST_LIMIT` items).
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
-  Must be `true`. Required guard against accidental deletion.
+<ParamField query="confirm" type="true (literal)" required>
+  Must be the literal value `true`. Required guard against accidental deletion.
 </ParamField>
 
 <ParamField query="dryRun" type="boolean">
@@ -274,8 +274,8 @@ Moves an object to a new key by performing a copy followed by a delete of the so
   The key to move the object to.
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
-  Must be `true`. Required guard.
+<ParamField query="confirm" type="true (literal)" required>
+  Must be the literal value `true`. Required guard.
 </ParamField>
 
 <ParamField query="allowOverwrite" type="boolean">
@@ -321,11 +321,11 @@ Renames an object by moving it to a new basename within its current prefix or an
 </ParamField>
 
 <ParamField query="newName" type="string" required>
-  The new basename for the object. Must not contain `/` or other path separators.
+  The new basename for the object. Must not be empty and must not contain path separators.
 </ParamField>
 
-<ParamField query="confirm" type="boolean" required>
-  Must be `true`. Required guard.
+<ParamField query="confirm" type="true (literal)" required>
+  Must be the literal value `true`. Required guard.
 </ParamField>
 
 <ParamField query="targetPrefix" type="string">
