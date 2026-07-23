@@ -1,0 +1,195 @@
+---
+title: "Wrangler Configuration Reference for R2 MCP Worker"
+sidebarTitle: "Wrangler Config"
+description: "Complete reference for wrangler.jsonc structure, R2 and KV bindings, secrets vs vars, Worker naming, and multi-environment deployment for the R2 MCP Worker."
+---
+
+The Worker is configured via `wrangler.jsonc` (or `wrangler.json`). This file tells Wrangler how to build, bind, and deploy the Worker: it declares the R2 bucket binding, the KV namespace for OAuth state, non-sensitive environment variables, and runtime compatibility settings. Sensitive credentials are kept out of this file entirely and are managed as encrypted Wrangler secrets. This page documents the required structure, all supported fields, and how to manage the config file throughout the development and deployment lifecycle.
+
+---
+
+## Getting Started
+
+The repository ships with a ready-to-edit example file. Copy it to create your working config:
+
+```bash
+cp wrangler.example.jsonc wrangler.jsonc
+```
+
+<Warning>
+  `wrangler.jsonc` is listed in `.gitignore` and must never be committed. It will contain real bucket names, KV namespace IDs, and account IDs that are specific to your Cloudflare account. Always work from the example file and keep your `wrangler.jsonc` local.
+</Warning>
+
+---
+
+## Full Example
+
+The following is the complete `wrangler.example.jsonc` as shipped in the repository:
+
+```jsonc
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-r2-remote-mcp-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "r2_buckets": [
+    {
+      "binding": "R2_BUCKET",
+      "bucket_name": "example-bucket",
+      "preview_bucket_name": "example-bucket-preview"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "vars": {
+    "AUTH_MODE": "github",
+    "ALLOWED_GITHUB_LOGINS": "your-github-login",
+    "R2_BUCKET_NAME": "example-bucket",
+    "R2_ROOT_PREFIX": "",
+    "MAX_INLINE_TEXT_BYTES": "262144",
+    "MAX_TRANSFER_BYTES": "1048576",
+    "MAX_LIST_LIMIT": "100",
+    "ENABLE_ACCOUNT_TOOLS": "false",
+    "ENABLE_PRESIGN_TOOLS": "false"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "dev": {
+    "port": 8787
+  }
+}
+```
+
+### Field-by-field explanation
+
+**`name`**
+The Worker name. This value determines the `workers.dev` subdomain the Worker is published to: `https://<name>.<subdomain>.workers.dev`. Choose a name that is unique within your Cloudflare account. Changing the name after initial deployment creates a new Worker URL.
+
+**`main`**
+The entry-point source file. Always `src/index.ts`. Do not change this value.
+
+**`compatibility_date`**
+Set to `2026-05-01`. This pins the Cloudflare Workers runtime behaviour to that date so that future runtime changes do not unexpectedly break the Worker. Advance this date only after testing.
+
+**`compatibility_flags`**
+Two flags are required:
+- `nodejs_compat` — enables the Node.js compatibility layer. The Worker uses `Buffer` for base64 encoding and decoding, which requires this flag.
+- `global_fetch_strictly_public` — ensures that `fetch()` calls from within the Worker can only reach publicly routable addresses, preventing SSRF to private network ranges.
+
+**`r2_buckets`**
+An array containing exactly one R2 bucket binding:
+- `binding` — must be `"R2_BUCKET"`. This is the name by which the Worker code accesses the bucket via `env.R2_BUCKET`.
+- `bucket_name` — the name of your R2 bucket in Cloudflare's systems. Replace `"example-bucket"` with your real bucket name.
+- `preview_bucket_name` — the bucket used when running `wrangler dev --remote`. Can be a separate preview bucket or the same bucket if you only have one.
+
+**`kv_namespaces`**
+An array containing exactly one KV namespace binding:
+- `binding` — must be `"OAUTH_KV"`. Accessed as `env.OAUTH_KV` in the Worker code.
+- `id` — the KV namespace ID from your Cloudflare account. Replace the placeholder zeros with your real namespace ID. Create one with `npx wrangler kv namespace create OAUTH_KV`.
+
+**`vars`**
+Non-sensitive configuration values that are injected as environment variables at runtime. See the [Environment Variables reference](/reference/environment-variables) for the meaning of each key. These values are committed in plain text — do not put secrets here.
+
+**`observability.enabled`**
+Set to `true` to enable Cloudflare's built-in Workers observability features (logs, traces, and metrics in the Cloudflare dashboard). Recommended for production deployments.
+
+**`dev.port`**
+The local port `wrangler dev` binds to. Defaults to `8787`. Change this if you need to run multiple Workers locally at the same time.
+
+---
+
+## Required Bindings
+
+The Worker will fail to start without the following bindings correctly configured in `wrangler.jsonc`:
+
+| Binding name | Type | Purpose | Required |
+|---|---|---|---|
+| `R2_BUCKET` | `R2Bucket` | Bound R2 bucket for all object read/write tools | Always |
+| `OAUTH_KV` | `KVNamespace` | Stores short-lived OAuth state tokens during GitHub login | When `AUTH_MODE=github` |
+
+Both binding names are hardcoded in `worker-configuration.d.ts` and the Worker source. They must match exactly — `R2_BUCKET` and `OAUTH_KV` — for TypeScript compilation and runtime binding resolution to succeed.
+
+---
+
+## Customizing the Worker Name and URL
+
+The `name` field in `wrangler.jsonc` directly determines the Worker's public URL:
+
+```text
+https://<name>.<your-subdomain>.workers.dev
+```
+
+<Note>
+  When you change the Worker name, the deployed URL changes. This means you must also update the **Authorization callback URL** in your GitHub OAuth App settings to match the new URL:
+
+  ```text
+  https://<new-name>.<your-subdomain>.workers.dev/callback
+  ```
+
+  GitHub OAuth will reject callbacks to unregistered URLs, locking out all users until the callback URL is updated.
+</Note>
+
+You can find your `workers.dev` subdomain in the Cloudflare dashboard under **Workers & Pages → Overview**.
+
+---
+
+## Secrets vs Vars
+
+`wrangler.jsonc` supports two categories of runtime configuration:
+
+**`vars`** — non-sensitive values stored in plain text in `wrangler.jsonc`. Visible to anyone with access to the config file or the Cloudflare dashboard. Use these for settings like `AUTH_MODE`, bucket names, numeric limits, and feature flags.
+
+**Secrets** — sensitive values encrypted at rest by Cloudflare and injected into the Worker environment at runtime. Never appear in `wrangler.jsonc`, source control, or deployment logs. Set with:
+
+```bash
+npx wrangler secret put <VARIABLE_NAME>
+```
+
+<Warning>
+  Placing a secret value under `vars` exposes it in plain text in your repository and in the Cloudflare dashboard. Always use `wrangler secret put` for credentials, tokens, and signing keys.
+</Warning>
+
+The table below shows which variables belong in `vars` and which must be secrets:
+
+| Variable | Location | Reason |
+|---|---|---|
+| `AUTH_MODE` | `vars` | Non-sensitive mode string |
+| `ALLOWED_GITHUB_LOGINS` | `vars` | Non-sensitive allowlist |
+| `R2_BUCKET_NAME` | `vars` | Non-sensitive bucket name |
+| `R2_ROOT_PREFIX` | `vars` | Non-sensitive path prefix |
+| `MAX_INLINE_TEXT_BYTES` | `vars` | Non-sensitive numeric limit |
+| `MAX_TRANSFER_BYTES` | `vars` | Non-sensitive numeric limit |
+| `MAX_LIST_LIMIT` | `vars` | Non-sensitive numeric limit |
+| `ENABLE_ACCOUNT_TOOLS` | `vars` | Non-sensitive feature flag |
+| `ENABLE_PRESIGN_TOOLS` | `vars` | Non-sensitive feature flag |
+| `CLOUDFLARE_ACCOUNT_ID` | `vars` | Account-scoped but not secret |
+| `R2_S3_ENDPOINT` | `vars` | Derived endpoint URL |
+| `R2_S3_REGION` | `vars` | Non-sensitive region string |
+| `GITHUB_CLIENT_ID` | secret | OAuth App credential |
+| `GITHUB_CLIENT_SECRET` | secret | OAuth App credential |
+| `COOKIE_ENCRYPTION_KEY` | secret | HMAC signing key |
+| `CLOUDFLARE_API_TOKEN` | secret | API access credential |
+| `R2_ACCESS_KEY_ID` | secret | R2 S3 API credential |
+| `R2_SECRET_ACCESS_KEY` | secret | R2 S3 API credential |
+
+---
+
+## Deploying Multiple Environments
+
+Wrangler supports named deployment environments that let you maintain separate configurations for development, staging, and production from a single project.
+
+<Note>
+  The `[env.name]` block syntax is supported in `wrangler.toml` (TOML format). When using `wrangler.jsonc`, the recommended approach is to maintain separate config files per environment — for example `wrangler.staging.jsonc` and `wrangler.production.jsonc` — and pass the target file to Wrangler at deploy time:
+
+  ```bash
+  npx wrangler deploy --config wrangler.production.jsonc
+  ```
+</Note>
+
+Each environment config file should have a distinct `name` value (e.g. `cloudflare-r2-remote-mcp-worker-staging`) so the deployed Workers do not overwrite each other. Remember to create separate R2 buckets, KV namespaces, and GitHub OAuth Apps (with matching callback URLs) for each environment that is exposed publicly.

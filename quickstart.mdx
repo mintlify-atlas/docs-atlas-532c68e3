@@ -1,47 +1,251 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Cloudflare R2 Remote MCP Worker"
+sidebarTitle: "Quickstart"
+description: "Deploy the R2 Remote MCP Worker to Cloudflare, configure GitHub OAuth, and connect your first MCP client in under 15 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+This guide walks you through deploying the Cloudflare R2 Remote MCP Worker and connecting an MCP client to it. By the end you will have a live Worker with a secured `/mcp` endpoint that exposes your R2 bucket as a set of MCP tools, ready to use from ChatGPT or MCP Inspector.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+<Warning>
+  **Never commit `wrangler.jsonc` or `.dev.vars` to source control.** Both files contain real bucket names, secret IDs, and OAuth credentials. Both files are listed in `.gitignore` by default — keep them there.
+</Warning>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Install dependencies and log in">
+    Install project dependencies and authenticate Wrangler with your Cloudflare account.
 
     ```bash
-    npm install your-package
+    npm install
+    npx wrangler login
+    ```
+
+    `wrangler login` opens a browser window and stores an OAuth token locally. Subsequent `wrangler` commands use this token automatically.
+  </Step>
+
+  <Step title="Create R2 buckets">
+    Create a production bucket and a preview bucket. The preview bucket is used when running `wrangler dev` locally so that local operations do not touch production data.
+
+    ```bash
+    npx wrangler r2 bucket create your-bucket-name
+    npx wrangler r2 bucket create your-preview-bucket-name
+    ```
+
+    Replace `your-bucket-name` and `your-preview-bucket-name` with names that suit your project. Bucket names must be globally unique within your Cloudflare account.
+  </Step>
+
+  <Step title="Configure the Worker">
+    Copy the example Wrangler config and edit it with your real values.
+
+    ```bash
+    cp wrangler.example.jsonc wrangler.jsonc
+    ```
+
+    Open `wrangler.jsonc` and update the following fields:
+
+    ```jsonc
+    {
+      "name": "your-worker-name",                    // Determines the workers.dev subdomain
+      "r2_buckets": [
+        {
+          "binding": "R2_BUCKET",
+          "bucket_name": "your-bucket-name",         // Production bucket
+          "preview_bucket_name": "your-preview-bucket-name"  // Local dev bucket
+        }
+      ],
+      "vars": {
+        "AUTH_MODE": "github",                       // Use "none" for local dev only
+        "ALLOWED_GITHUB_LOGINS": "your-github-login", // Comma-separated GitHub usernames
+        "R2_BUCKET_NAME": "your-bucket-name",        // Must match bucket_name above
+        "R2_ROOT_PREFIX": "",                        // Optional: restrict to a key prefix
+        "MAX_INLINE_TEXT_BYTES": "262144",
+        "MAX_TRANSFER_BYTES": "1048576",
+        "MAX_LIST_LIMIT": "100",
+        "ENABLE_ACCOUNT_TOOLS": "false",
+        "ENABLE_PRESIGN_TOOLS": "false"
+      }
+    }
+    ```
+
+    `ALLOWED_GITHUB_LOGINS` accepts a comma-separated list of GitHub usernames. Only users whose GitHub login appears in this list will be granted access through the OAuth flow.
+  </Step>
+
+  <Step title="Configure local development variables">
+    Copy the example local dev vars file. This file supplies environment variables to `wrangler dev` without deploying them to Cloudflare.
+
+    ```bash
+    cp .dev.vars.example .dev.vars
+    ```
+
+    The copied file sets `AUTH_MODE=none` so you can test locally without going through GitHub OAuth on every request.
+
+    <Note>
+      `AUTH_MODE=none` is for **local development only**. It disables all authentication checks. Never set this value on a public Worker URL unless a separate access layer (such as Cloudflare Access) protects the endpoint.
+    </Note>
+
+    Fill in the optional fields you plan to test locally:
+
+    ```bash
+    # .dev.vars
+    AUTH_MODE=none
+    R2_BUCKET_NAME=your-bucket-name
+    R2_ROOT_PREFIX=
+
+    # Optional: read-only Cloudflare account tools
+    ENABLE_ACCOUNT_TOOLS=false
+    CLOUDFLARE_ACCOUNT_ID=your-account-id
+    CLOUDFLARE_API_TOKEN=your-read-only-api-token
+
+    # Optional: presigned URL tools
+    ENABLE_PRESIGN_TOOLS=false
+    R2_ACCESS_KEY_ID=your-r2-access-key-id
+    R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+    R2_S3_REGION=auto
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create the OAuth KV namespace">
+    The Worker stores OAuth state (authorization codes, PKCE verifiers, session tokens) in a KV namespace. Create it with Wrangler:
 
     ```bash
-    your-cli init
+    npx wrangler kv namespace create OAUTH_KV
+    ```
+
+    Wrangler prints a namespace ID similar to:
+
+    ```text
+    [[kv_namespaces]]
+    binding = "OAUTH_KV"
+    id = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+    ```
+
+    Copy the generated `id` value and add it to the `kv_namespaces` section of `wrangler.jsonc`:
+
+    ```jsonc
+    "kv_namespaces": [
+      {
+        "binding": "OAUTH_KV",
+        "id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"  // Replace with your real ID
+      }
+    ]
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Set up GitHub OAuth App and secrets">
+    **Create the GitHub OAuth App:**
+
+    1. Go to [GitHub Settings → Developer settings → OAuth Apps](https://github.com/settings/developers) and click **New OAuth App**.
+    2. Set **Homepage URL** to your Worker URL: `https://<worker-name>.<account-subdomain>.workers.dev`
+    3. Set **Authorization callback URL** to:
+       ```text
+       https://<worker-name>.<account-subdomain>.workers.dev/callback
+       ```
+    4. Click **Register application**, then generate a **Client secret**.
+
+    **Push the secrets to Cloudflare** using `wrangler secret put`. Each command prompts you to paste the value:
+
+    <CodeGroup>
+      ```bash Client ID
+      npx wrangler secret put GITHUB_CLIENT_ID -c wrangler.jsonc
+      ```
+
+      ```bash Client Secret
+      npx wrangler secret put GITHUB_CLIENT_SECRET -c wrangler.jsonc
+      ```
+
+      ```bash Cookie Encryption Key
+      npx wrangler secret put COOKIE_ENCRYPTION_KEY -c wrangler.jsonc
+      ```
+    </CodeGroup>
+
+    For `COOKIE_ENCRYPTION_KEY`, use at least 32 random bytes. You can generate a suitable value with:
 
     ```bash
-    your-cli start
+    openssl rand -hex 32
+    ```
+
+    Secrets are encrypted at rest in Cloudflare and are never visible in `wrangler.jsonc` or the dashboard after being set.
+  </Step>
+
+  <Step title="Deploy">
+    Deploy the Worker to Cloudflare:
+
+    ```bash
+    npm run deploy
+    ```
+
+    After a successful deploy, Wrangler prints your Worker URL. Your two key endpoints are:
+
+    | Endpoint | URL |
+    |---|---|
+    | **MCP** | `https://<worker-name>.<account-subdomain>.workers.dev/mcp` |
+    | **Health check** | `https://<worker-name>.<account-subdomain>.workers.dev/healthz` |
+
+    Open the health endpoint in a browser or with `curl`. A healthy response looks like:
+
+    ```json
+    {
+      "ok": true,
+      "bucketAccessible": true,
+      "authMode": "github",
+      "accountToolsEnabled": false,
+      "presignToolsEnabled": false,
+      "rootPrefix": "",
+      "maxInlineTextBytes": 262144,
+      "maxListLimit": 100,
+      "maxTransferBytes": 1048576
+    }
+    ```
+
+    If `bucketAccessible` is `false`, check that `R2_BUCKET_NAME` in `wrangler.jsonc` matches the `bucket_name` in `r2_buckets` and that the bucket exists in your account.
+  </Step>
+
+  <Step title="Connect ChatGPT">
+    In ChatGPT, open **Settings → Connectors** (or the custom MCP connector section) and add a new connector:
+
+    | Field | Value |
+    |---|---|
+    | **URL** | `https://<worker-name>.<account-subdomain>.workers.dev/mcp` |
+    | **Authentication** | OAuth |
+
+    When you (or any user) first use the connector, ChatGPT redirects to GitHub for authorization. Log in with a GitHub account whose username appears in `ALLOWED_GITHUB_LOGINS`. After approving the OAuth App, GitHub redirects back to the Worker's `/callback` endpoint, completes the token exchange, and the connector becomes active.
+
+    Click **Refresh tools** (or equivalent) to confirm that tools such as `r2_object_list` appear in the connector's tool list.
+  </Step>
+
+  <Step title="Verify">
+    Run the smoke test to confirm the deployed Worker is healthy and responding:
+
+    ```bash
+    npm run smoke
+    ```
+
+    The smoke test hits `/healthz` and checks that the response confirms bucket accessibility. You can also verify manually:
+
+    - **Health endpoint** — `GET /healthz` should return `"ok": true`
+    - **MCP tool list** — Use [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against `https://<worker-name>.<account-subdomain>.workers.dev/mcp` and confirm `r2_object_list` is present
+    - **ChatGPT** — Ask the connector to list objects in your bucket; it should invoke `r2_object_list` and return results
+
+    For type-checking the source without deploying:
+
+    ```bash
+    npm run type-check
     ```
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## What's next
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Deploy" icon="rocket" href="/deployment/deploy">
+    Learn about production deployment options, custom domains, environment promotion, and rolling updates.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/auth/overview">
+    Understand the GitHub OAuth flow, KV session storage, allowed login configuration, and how to rotate secrets.
+  </Card>
+  <Card title="MCP Tools" icon="wrench" href="/tools/overview">
+    Explore every available MCP tool: object operations, base64 transfer, optional account tools, and presigned URLs.
+  </Card>
+  <Card title="Verify" icon="circle-check" href="/operations/verify">
+    Run the full verification suite, interpret health endpoint output, and troubleshoot common deployment issues.
+  </Card>
+</CardGroup>

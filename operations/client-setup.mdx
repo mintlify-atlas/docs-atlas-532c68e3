@@ -1,0 +1,116 @@
+---
+title: "Connect MCP Clients to the R2 Worker /mcp Endpoint"
+sidebarTitle: "Client Setup"
+description: "Configure ChatGPT, MCP Inspector, and generic MCP clients to connect to the R2 Worker's /mcp endpoint with GitHub OAuth or no-auth local mode."
+---
+
+The Worker's `/mcp` endpoint is the single connection point for all MCP clients. When `AUTH_MODE=github` is set, clients use the OAuth routes the Worker exposes to complete a GitHub login before accessing any tools. This page covers setup for ChatGPT, MCP Inspector, and any generic MCP-compatible client.
+
+## Endpoint URLs
+
+Use the appropriate endpoint depending on whether you are connecting to a deployed Worker or a local development server:
+
+```text
+Remote: https://<worker-url>/mcp
+Local:  http://localhost:8787/mcp
+```
+
+With `AUTH_MODE=github`, the Worker also exposes the following OAuth routes that clients and browsers use during the authorization flow:
+
+```text
+/authorize
+/token
+/register
+/callback
+```
+
+The browser login during OAuth must use a GitHub account that is listed in the `ALLOWED_GITHUB_LOGINS` environment variable.
+
+## ChatGPT
+
+<Steps>
+  <Step title="Open ChatGPT settings">
+    Navigate to **Settings** in ChatGPT.
+  </Step>
+  <Step title="Go to Connectors or Apps & Connectors">
+    Select the **Connectors** or **Apps & Connectors** section from the settings menu.
+  </Step>
+  <Step title="Enable Developer Mode if required">
+    If the connector options are not visible, enable **Developer Mode** first.
+  </Step>
+  <Step title="Create a custom connector">
+    Select **Add connector** or **Create custom connector**, then choose **MCP** or **Remote MCP connector** as the connector type.
+  </Step>
+  <Step title="Set the connector URL">
+    Enter the Worker's MCP endpoint as the URL:
+
+    ```text
+    https://<worker-url>/mcp
+    ```
+  </Step>
+  <Step title="Choose OAuth authentication">
+    Select **OAuth** as the authentication method for the connector.
+  </Step>
+  <Step title="Save the connector">
+    Click **Save** or **Create** to register the connector.
+  </Step>
+  <Step title="Start the connection flow">
+    Initiate the connection and approve the GitHub OAuth login in the browser window that opens.
+  </Step>
+  <Step title="Refresh or list tools/actions">
+    Once connected, refresh the tool or action list to confirm the R2 tools are visible.
+  </Step>
+</Steps>
+
+<Note>
+  Write and modify tools such as `r2_object_put`, `r2_object_delete`, and `r2_object_move` may require explicit confirmation from the user before ChatGPT executes them.
+</Note>
+
+## MCP Inspector
+
+MCP Inspector is the fastest way to validate a connection and inspect the tool list interactively. Run the inspector with:
+
+```bash
+npx @modelcontextprotocol/inspector@latest
+```
+
+Connect to the Worker endpoint in the Inspector UI:
+
+```text
+https://<worker-url>/mcp
+```
+
+**Expected behavior with `AUTH_MODE=github`:**
+
+- The OAuth flow opens in a browser tab automatically.
+- You complete the GitHub login.
+- The Inspector receives the access token and connects.
+- The **tools/list** tab shows all enabled tools.
+
+## Generic MCP Client
+
+Any client that supports remote MCP over streamable HTTP can connect to the Worker. Configure the client with:
+
+```text
+endpoint = https://<worker-url>/mcp
+auth = OAuth
+```
+
+For local development with `AUTH_MODE=none`, no authentication is required:
+
+```text
+endpoint = http://localhost:8787/mcp
+auth = none
+```
+
+## What tools/list Confirms
+
+A successful `tools/list` response proves three things:
+
+- The client reached `/mcp` and the Worker responded.
+- Authentication completed successfully (when `AUTH_MODE=github` is enabled).
+- The Worker registered its tools without errors on startup.
+
+<Note>
+  `tools/list` does **not** prove that every tool can successfully reach the R2 bucket. A Worker can register tools even when the bucket binding is misconfigured. Use the `/healthz` endpoint to verify bucket accessibility separately.
+</Note>

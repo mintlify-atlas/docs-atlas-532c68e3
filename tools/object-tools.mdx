@@ -1,0 +1,378 @@
+---
+title: "R2 Object Tools: List, Read, Write, Delete, and Move"
+sidebarTitle: "Object Tools"
+description: "Reference for the 10 core R2 object tools: listing, reading, writing, deleting, copying, moving, and renaming objects in your bound bucket."
+---
+
+The 10 core object tools operate on the R2 bucket bound to the Worker via the `R2_BUCKET` binding. No additional credentials are required beyond the binding itself. When `R2_ROOT_PREFIX` is set, all keys accepted by and returned from these tools are relative to that prefix — the Worker handles prefix resolution transparently.
+
+## r2_object_list
+
+Lists objects and delimited prefixes under the configured R2 root prefix. Supports prefix filtering, pagination via cursor, and delimiter-based hierarchy simulation.
+
+**Parameters**
+
+<ParamField query="prefix" type="string">
+  Return only objects whose keys begin with this string. Optional.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of objects to return. Must be between 1 and `MAX_LIST_LIMIT` (default 100). Optional.
+</ParamField>
+
+<ParamField query="cursor" type="string">
+  Pagination cursor returned from a previous truncated response. Optional.
+</ParamField>
+
+<ParamField query="delimiter" type="string">
+  Single character used to group keys into virtual directories. Typically `/`. Optional.
+</ParamField>
+
+**Returns:** `{ objects: [...], delimitedPrefixes: [...], truncated: boolean, cursor?: string, rootPrefix: string }`
+
+```json Example
+{
+  "prefix": "notes/",
+  "limit": 20
+}
+```
+
+---
+
+## r2_object_head
+
+Returns metadata for one object without fetching its body. Use this to check whether an object exists or to read its content type, size, ETag, and custom metadata before deciding whether to download it.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The object key, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+**Returns:** `{ key, size, contentType, etag, lastModified, customMetadata }`
+
+```json Example
+{
+  "key": "notes/example.txt"
+}
+```
+
+---
+
+## r2_object_get
+
+Reads and returns the content of a text-like R2 object as a UTF-8 string. The tool checks the content type before fetching and rejects binary content types. Object size must not exceed `MAX_INLINE_TEXT_BYTES` (default 262,144 bytes).
+
+Text-like content types include `text/*`, `application/json`, `application/ld+json`, `application/xml`, `application/yaml`, `application/x-yaml`, `application/javascript`, `application/x-javascript`, and `application/typescript`.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The object key, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+**Returns:** `{ key, content, contentType, etag, size, lastModified }`
+
+<Note>
+  For binary content types or objects exceeding `MAX_INLINE_TEXT_BYTES`, use `r2_download_base64` or generate a presigned URL with `r2_presign_get`.
+</Note>
+
+```json Example
+{
+  "key": "notes/example.txt"
+}
+```
+
+---
+
+## r2_object_put
+
+Writes UTF-8 text to an R2 object, creating or overwriting it. The encoded byte length of `text` must not exceed `MAX_TRANSFER_BYTES` (default 1,048,576 bytes). Providing `expectedEtag` enables a conditional write — the operation returns a 409 error if the current ETag does not match.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The destination object key, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="text" type="string" required>
+  The UTF-8 text body to write.
+</ParamField>
+
+<ParamField query="contentType" type="string">
+  MIME type to store with the object. Optional.
+</ParamField>
+
+<ParamField query="customMetadata" type="object">
+  Key-value string pairs stored as object metadata. Optional.
+</ParamField>
+
+<ParamField query="expectedEtag" type="string">
+  If provided, the write only proceeds when the existing object ETag matches this value. Returns 409 on mismatch. Optional.
+</ParamField>
+
+**Returns:** `ObjectMetadata` — `{ key, size, contentType, etag, lastModified, customMetadata }`
+
+```json Example
+{
+  "key": "notes/hello.txt",
+  "text": "hello world",
+  "contentType": "text/plain"
+}
+```
+
+---
+
+## r2_object_put_if_absent
+
+Creates a UTF-8 text object only when the key does not already exist. If the object is present, the tool returns a 409 conflict error without modifying the existing content.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The destination object key, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="text" type="string" required>
+  The UTF-8 text body to write.
+</ParamField>
+
+<ParamField query="contentType" type="string">
+  MIME type to store with the object. Optional.
+</ParamField>
+
+<ParamField query="customMetadata" type="object">
+  Key-value string pairs stored as object metadata. Optional.
+</ParamField>
+
+**Returns:** `ObjectMetadata` — `{ key, size, contentType, etag, lastModified, customMetadata }`
+
+```json Example
+{
+  "key": "config/init.json",
+  "text": "{}",
+  "contentType": "application/json"
+}
+```
+
+---
+
+## r2_object_delete
+
+Deletes one object from the bound R2 bucket. The `confirm: true` field is required in the input to prevent accidental deletion.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The object key to delete, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="confirm" type="boolean" required>
+  Must be `true`. Required guard against accidental deletion.
+</ParamField>
+
+**Returns:** `{ deleted: true, key: string }`
+
+```json Example
+{
+  "key": "notes/old.txt",
+  "confirm": true
+}
+```
+
+---
+
+## r2_object_delete_many
+
+Deletes multiple objects from the bound R2 bucket in a single call. Accepts between 1 and `MAX_LIST_LIMIT` keys. When `dryRun: true` is provided, the tool returns the planned operation without modifying R2.
+
+**Parameters**
+
+<ParamField query="keys" type="string[]" required>
+  Array of object keys to delete (1 to `MAX_LIST_LIMIT` items).
+</ParamField>
+
+<ParamField query="confirm" type="boolean" required>
+  Must be `true`. Required guard against accidental deletion.
+</ParamField>
+
+<ParamField query="dryRun" type="boolean">
+  When `true`, returns the planned operation without deleting anything. Optional.
+</ParamField>
+
+**Returns:** `{ deletedKeys: string[] }` or a dry-run preview object.
+
+```json Example
+{
+  "keys": ["notes/a.txt", "notes/b.txt"],
+  "confirm": true
+}
+```
+
+```json Dry run
+{
+  "keys": ["notes/a.txt"],
+  "confirm": true,
+  "dryRun": true
+}
+```
+
+---
+
+## r2_object_copy
+
+Copies an object to a new key within the bound bucket. The operation is implemented as a read followed by a write and is therefore not atomic. By default the tool rejects the operation if the destination key already exists.
+
+**Parameters**
+
+<ParamField query="sourceKey" type="string" required>
+  The key of the object to copy, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="destinationKey" type="string" required>
+  The key to copy the object to, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="allowOverwrite" type="boolean">
+  When `true`, overwrites the destination if it exists. Defaults to `false`. Optional.
+</ParamField>
+
+<ParamField query="expectedSourceEtag" type="string">
+  Conditional guard: copy only proceeds when the source ETag matches. Optional.
+</ParamField>
+
+<ParamField query="expectedDestinationEtag" type="string">
+  Conditional guard: copy only proceeds when the destination ETag matches. Optional.
+</ParamField>
+
+**Returns:** `{ source: ObjectMetadata, destination: ObjectMetadata }`
+
+<Warning>
+  `r2_object_copy` is not atomic. The source is read and then the destination is written as two separate R2 operations. If the Worker is interrupted between the two, the source remains unchanged but the destination may be in a partial state.
+</Warning>
+
+```json Example
+{
+  "sourceKey": "docs/a.txt",
+  "destinationKey": "archive/a.txt"
+}
+```
+
+---
+
+## r2_object_move
+
+Moves an object to a new key by performing a copy followed by a delete of the source. Requires `confirm: true`. When `dryRun: true` is provided, the planned steps are returned without any mutation.
+
+**Parameters**
+
+<ParamField query="sourceKey" type="string" required>
+  The key of the object to move.
+</ParamField>
+
+<ParamField query="destinationKey" type="string" required>
+  The key to move the object to.
+</ParamField>
+
+<ParamField query="confirm" type="boolean" required>
+  Must be `true`. Required guard.
+</ParamField>
+
+<ParamField query="allowOverwrite" type="boolean">
+  When `true`, overwrites the destination if it exists. Optional.
+</ParamField>
+
+<ParamField query="dryRun" type="boolean">
+  When `true`, returns the planned steps without mutating R2. Optional.
+</ParamField>
+
+<ParamField query="expectedSourceEtag" type="string">
+  Conditional guard on the source object. Optional.
+</ParamField>
+
+<ParamField query="expectedDestinationEtag" type="string">
+  Conditional guard on the destination object. Optional.
+</ParamField>
+
+**Returns:** `{ sourceKey, deletedSourceKey, destination: ObjectMetadata }`
+
+<Warning>
+  `r2_object_move` is not atomic. If the Worker is interrupted after the copy succeeds but before the source delete completes, both source and destination will exist simultaneously.
+</Warning>
+
+```json Example
+{
+  "sourceKey": "drafts/a.txt",
+  "destinationKey": "docs/a.txt",
+  "confirm": true
+}
+```
+
+---
+
+## r2_object_rename
+
+Renames an object by moving it to a new basename within its current prefix or an explicitly specified target prefix. The `newName` field must be a plain filename with no path separators. Like move, this is copy then delete and is not atomic.
+
+**Parameters**
+
+<ParamField query="currentKey" type="string" required>
+  The current full object key.
+</ParamField>
+
+<ParamField query="newName" type="string" required>
+  The new basename for the object. Must not contain `/` or other path separators.
+</ParamField>
+
+<ParamField query="confirm" type="boolean" required>
+  Must be `true`. Required guard.
+</ParamField>
+
+<ParamField query="targetPrefix" type="string">
+  Explicit prefix to place the renamed object under. If omitted, the object keeps its current prefix. Optional.
+</ParamField>
+
+<ParamField query="allowOverwrite" type="boolean">
+  When `true`, overwrites the destination if it exists. Optional.
+</ParamField>
+
+<ParamField query="dryRun" type="boolean">
+  When `true`, returns the planned operation without mutating R2. Optional.
+</ParamField>
+
+<ParamField query="expectedSourceEtag" type="string">
+  Conditional guard on the source object. Optional.
+</ParamField>
+
+<ParamField query="expectedDestinationEtag" type="string">
+  Conditional guard on the destination object. Optional.
+</ParamField>
+
+**Returns:** `{ sourceKey, deletedSourceKey, destinationKey, destination: ObjectMetadata }`
+
+<Warning>
+  `r2_object_rename` is not atomic. If the delete of the original key fails after the copy succeeds, both the old and new keys will exist simultaneously.
+</Warning>
+
+```json Example
+{
+  "currentKey": "notes/draft.txt",
+  "newName": "final.txt",
+  "confirm": true
+}
+```
+
+---
+
+## Destructive Guards
+
+Destructive tools enforce confirmation at the schema level. Omitting `confirm: true` causes the call to fail validation before any R2 operation is attempted.
+
+| Tool | Required | Optional |
+|---|---|---|
+| `r2_object_delete` | `confirm: true` | — |
+| `r2_object_delete_many` | `confirm: true` | `dryRun: true` |
+| `r2_object_move` | `confirm: true` | `dryRun: true` |
+| `r2_object_rename` | `confirm: true` | `dryRun: true` |
+
+When `dryRun: true` is provided alongside `confirm: true`, the tool returns a structured preview of the planned operation — including the keys that would be affected — without making any changes to R2.

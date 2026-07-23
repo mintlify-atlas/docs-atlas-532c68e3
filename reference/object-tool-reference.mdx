@@ -1,0 +1,623 @@
+---
+title: "Object Tool Reference: Parameters, Returns, and Errors"
+sidebarTitle: "Object Tools"
+description: "Complete parameter and return-type reference for all 10 R2 object tools, including Zod-validated inputs, typed responses, and R2McpError codes."
+---
+
+This page is the complete parameter and return-type reference for all 10 R2 object tools registered by the Cloudflare R2 Remote MCP Worker. Every input is validated with a Zod schema at call time; each tool returns a typed JSON result or surfaces a structured `R2McpError` with a machine-readable code and HTTP status.
+
+---
+
+## r2_object_list
+
+List objects stored under the configured `R2_ROOT_PREFIX`. Results are always scoped to the root prefix — keys returned in `objects` are relative to that prefix.
+
+### Parameters
+
+<ParamField query="prefix" type="string" optional>
+  Filter results to keys that begin with this prefix, relative to `R2_ROOT_PREFIX`. Omit to list all objects in the bucket scope.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Maximum number of objects to return. Must be between `1` and `MAX_LIST_LIMIT` (default `100`). Defaults to `MAX_LIST_LIMIT` when omitted.
+</ParamField>
+
+<ParamField query="cursor" type="string" optional>
+  Opaque pagination cursor returned in a previous truncated response. Pass this value to fetch the next page of results.
+</ParamField>
+
+<ParamField query="delimiter" type="string" optional>
+  Single-character delimiter used to group keys into virtual directories. Maximum length: 1 character. Common value: `"/"`.
+</ParamField>
+
+### Returns
+
+<ResponseField name="objects" type="ObjectMetadata[]" required>
+  Array of object metadata records for each key in the page. See [ObjectMetadata type](#objectmetadata-type) for field details.
+</ResponseField>
+
+<ResponseField name="delimitedPrefixes" type="string[]" required>
+  Common key prefixes collapsed by the `delimiter`, relative to `R2_ROOT_PREFIX`. Empty when `delimiter` is not provided.
+</ResponseField>
+
+<ResponseField name="truncated" type="boolean" required>
+  `true` when more results exist beyond this page. Use the returned `cursor` to fetch the next page.
+</ResponseField>
+
+<ResponseField name="cursor" type="string">
+  Opaque pagination cursor. Present only when `truncated` is `true`.
+</ResponseField>
+
+<ResponseField name="rootPrefix" type="string" required>
+  The resolved `R2_ROOT_PREFIX` in effect for this call. Useful for debugging scope.
+</ResponseField>
+
+### Error codes
+
+This tool returns an empty result set rather than an error when the bucket is empty or no objects match the prefix. No `R2McpError` codes are raised under normal conditions.
+
+---
+
+## r2_object_head
+
+Return metadata for a single R2 object without downloading its body. Equivalent to an HTTP `HEAD` request.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`. Must not contain `..`, null bytes, or be an absolute path.
+</ParamField>
+
+### Returns
+
+Returns an [ObjectMetadata](#objectmetadata-type) object directly.
+
+<ResponseField name="key" type="string" required>
+  Relative object key.
+</ResponseField>
+
+<ResponseField name="size" type="number" required>
+  Object size in bytes.
+</ResponseField>
+
+<ResponseField name="contentType" type="string | null" required>
+  MIME type stored with the object, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="etag" type="string" required>
+  ETag of the stored object.
+</ResponseField>
+
+<ResponseField name="lastModified" type="string | null" required>
+  ISO 8601 timestamp of the last write, or `null` if unavailable.
+</ResponseField>
+
+<ResponseField name="customMetadata" type="object" required>
+  Key-value pairs of custom metadata attached to the object.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `object_not_found` | 404 | No object exists at the given key. |
+
+---
+
+## r2_object_get
+
+Read the body of a text-like R2 object. The tool checks that the object's `contentType` is text-like (e.g. `text/*`, `application/json`, `application/yaml`, etc.) and that its size does not exceed `MAX_INLINE_TEXT_BYTES` (default 256 KiB) before fetching.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ParamField>
+
+### Returns
+
+<ResponseField name="key" type="string" required>
+  Relative object key.
+</ResponseField>
+
+<ResponseField name="content" type="string" required>
+  UTF-8 decoded body of the object.
+</ResponseField>
+
+<ResponseField name="contentType" type="string | null" required>
+  MIME type of the object, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="etag" type="string" required>
+  ETag of the stored object.
+</ResponseField>
+
+<ResponseField name="size" type="number" required>
+  Object size in bytes.
+</ResponseField>
+
+<ResponseField name="lastModified" type="string | null" required>
+  ISO 8601 timestamp of the last write, or `null` if unavailable.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `object_not_found` | 404 | No object exists at the given key. |
+| `unsupported_content_type` | 415 | Object has a binary or unsupported MIME type. Use `r2_download_base64` instead. |
+| `payload_too_large` | 413 | Object size exceeds `MAX_INLINE_TEXT_BYTES`. |
+
+---
+
+## r2_object_put
+
+Write a UTF-8 text string to an R2 object. Optionally supply `expectedEtag` to perform a conditional overwrite — the write is rejected if the stored ETag does not match.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ParamField>
+
+<ParamField body="text" type="string" required>
+  UTF-8 text body to store. The UTF-8 encoded byte length must not exceed `MAX_TRANSFER_BYTES` (default 1 MiB).
+</ParamField>
+
+<ParamField body="contentType" type="string" optional>
+  MIME type to store with the object (e.g. `text/plain`, `application/json`).
+</ParamField>
+
+<ParamField body="customMetadata" type="object" optional>
+  Arbitrary string key-value pairs to attach as custom metadata.
+</ParamField>
+
+<ParamField body="expectedEtag" type="string" optional>
+  If provided, the write only succeeds when the current stored ETag matches this value exactly. Use `"*"` to require that the object already exists.
+</ParamField>
+
+### Returns
+
+Returns the [ObjectMetadata](#objectmetadata-type) of the newly written object.
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `payload_too_large` | 413 | UTF-8 encoded `text` exceeds `MAX_TRANSFER_BYTES`. |
+| `etag_conflict` | 409 | `expectedEtag` was supplied and the current ETag did not match. |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |
+
+---
+
+## r2_object_put_if_absent
+
+Write a UTF-8 text object only when no object currently exists at the given key. Internally uses R2's `etagDoesNotMatch: "*"` condition.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ParamField>
+
+<ParamField body="text" type="string" required>
+  UTF-8 text body to store. The UTF-8 encoded byte length must not exceed `MAX_TRANSFER_BYTES`.
+</ParamField>
+
+<ParamField body="contentType" type="string" optional>
+  MIME type to store with the object.
+</ParamField>
+
+<ParamField body="customMetadata" type="object" optional>
+  Arbitrary string key-value pairs to attach as custom metadata.
+</ParamField>
+
+### Returns
+
+Returns the [ObjectMetadata](#objectmetadata-type) of the newly created object.
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `payload_too_large` | 413 | UTF-8 encoded `text` exceeds `MAX_TRANSFER_BYTES`. |
+| `object_already_exists` | 409 | An object already exists at the given key. |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |
+
+---
+
+## r2_object_delete
+
+Delete a single R2 object. The `confirm: true` field is required to prevent accidental deletion.
+
+<Warning>
+  This operation is destructive and cannot be undone. R2 does not maintain a recycle bin.
+</Warning>
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ParamField>
+
+<ParamField body="confirm" type="true" required>
+  Must be the literal boolean `true`. This field is a required safety guard.
+</ParamField>
+
+### Returns
+
+<ResponseField name="deleted" type="true" required>
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="key" type="string" required>
+  The relative key of the deleted object.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |
+
+<Note>
+  R2 does not return an error when deleting a key that does not exist. The response will still show `deleted: true`.
+</Note>
+
+---
+
+## r2_object_delete_many
+
+Delete multiple R2 objects in a single call. Use `dryRun: true` to preview what would be deleted without actually removing any objects.
+
+<Warning>
+  This operation is destructive and cannot be undone.
+</Warning>
+
+### Parameters
+
+<ParamField body="keys" type="string[]" required>
+  Array of relative object keys to delete. Minimum 1 key, maximum `MAX_LIST_LIMIT` keys (default 100).
+</ParamField>
+
+<ParamField body="confirm" type="true" required>
+  Must be the literal boolean `true`. This field is a required safety guard.
+</ParamField>
+
+<ParamField body="dryRun" type="boolean" optional>
+  When `true`, no objects are deleted. The response describes what would have been deleted. Defaults to `false`.
+</ParamField>
+
+### Returns
+
+**Live run** (`dryRun` omitted or `false`):
+
+<ResponseField name="deletedKeys" type="string[]" required>
+  Array of relative keys that were deleted.
+</ResponseField>
+
+**Dry run** (`dryRun: true`):
+
+<ResponseField name="dryRun" type="true" required>
+  Always `true` when a dry run was requested.
+</ResponseField>
+
+<ResponseField name="operation" type="string" required>
+  Always `"r2_object_delete_many"`.
+</ResponseField>
+
+<ResponseField name="keys" type="string[]" required>
+  The keys that would have been deleted.
+</ResponseField>
+
+<ResponseField name="wouldDeleteCount" type="number" required>
+  Number of keys that would be deleted.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `invalid_path` | 400 | One or more keys contain `..`, null bytes, or are otherwise invalid. |
+
+---
+
+## r2_object_copy
+
+Copy a source object to a destination key within the same R2 bucket. The operation reads the source body (subject to `MAX_TRANSFER_BYTES`) and writes it to the destination, preserving `contentType` and `customMetadata`.
+
+### Parameters
+
+<ParamField body="sourceKey" type="string" required>
+  Relative key of the source object.
+</ParamField>
+
+<ParamField body="destinationKey" type="string" required>
+  Relative key where the copy will be written.
+</ParamField>
+
+<ParamField body="allowOverwrite" type="boolean" optional>
+  When `false` (default), the copy is aborted if the destination already exists. Set to `true` to overwrite an existing destination.
+</ParamField>
+
+<ParamField body="expectedSourceEtag" type="string" optional>
+  If provided, the copy is aborted when the source object's ETag does not match this value.
+</ParamField>
+
+<ParamField body="expectedDestinationEtag" type="string" optional>
+  If provided, the destination write is conditional on the current destination ETag matching this value.
+</ParamField>
+
+### Returns
+
+<ResponseField name="source" type="ObjectMetadata" required>
+  Metadata of the source object at the time of the copy.
+</ResponseField>
+
+<ResponseField name="destination" type="ObjectMetadata" required>
+  Metadata of the newly written destination object.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `object_not_found` | 404 | Source key does not exist. |
+| `destination_exists` | 409 | Destination key exists and `allowOverwrite` is not `true`. |
+| `etag_conflict` | 409 | `expectedSourceEtag` or `expectedDestinationEtag` did not match the stored ETag. |
+| `payload_too_large` | 413 | Source object size exceeds `MAX_TRANSFER_BYTES`. |
+
+---
+
+## r2_object_move
+
+Move a source object to a destination key. This is a copy-then-delete operation and is **not atomic**. Use `dryRun: true` to preview the steps without making changes.
+
+<Warning>
+  Move is not atomic. If the delete step fails after the copy succeeds, both the source and destination will exist.
+</Warning>
+
+### Parameters
+
+<ParamField body="sourceKey" type="string" required>
+  Relative key of the object to move.
+</ParamField>
+
+<ParamField body="destinationKey" type="string" required>
+  Relative key of the destination.
+</ParamField>
+
+<ParamField body="confirm" type="true" required>
+  Must be the literal boolean `true`.
+</ParamField>
+
+<ParamField body="allowOverwrite" type="boolean" optional>
+  When `true`, an existing destination object will be overwritten. Defaults to `false`.
+</ParamField>
+
+<ParamField body="dryRun" type="boolean" optional>
+  When `true`, no changes are made. Returns a preview of the planned steps.
+</ParamField>
+
+<ParamField body="expectedSourceEtag" type="string" optional>
+  Abort the move if the source ETag does not match this value.
+</ParamField>
+
+<ParamField body="expectedDestinationEtag" type="string" optional>
+  Abort the destination write if the destination ETag does not match this value.
+</ParamField>
+
+### Returns
+
+**Live run**:
+
+<ResponseField name="sourceKey" type="string" required>
+  The original key that was moved.
+</ResponseField>
+
+<ResponseField name="deletedSourceKey" type="string" required>
+  The source key that was deleted after the copy.
+</ResponseField>
+
+<ResponseField name="destination" type="ObjectMetadata" required>
+  Metadata of the written destination object.
+</ResponseField>
+
+**Dry run** (`dryRun: true`):
+
+<ResponseField name="dryRun" type="true" required>
+  Always `true`.
+</ResponseField>
+
+<ResponseField name="operation" type="string" required>
+  Always `"r2_object_move"`.
+</ResponseField>
+
+<ResponseField name="sourceKey" type="string" required>
+  Source key that would be moved.
+</ResponseField>
+
+<ResponseField name="destinationKey" type="string" required>
+  Destination key that would be written.
+</ResponseField>
+
+<ResponseField name="steps" type="string[]" required>
+  Ordered list of steps that would be executed: `["copy source to destination", "delete source"]`.
+</ResponseField>
+
+<ResponseField name="allowOverwrite" type="boolean" required>
+  Resolved value of `allowOverwrite`.
+</ResponseField>
+
+<ResponseField name="expectedSourceEtag" type="string | null" required>
+  Value of `expectedSourceEtag`, or `null` if not supplied.
+</ResponseField>
+
+<ResponseField name="expectedDestinationEtag" type="string | null" required>
+  Value of `expectedDestinationEtag`, or `null` if not supplied.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `object_not_found` | 404 | Source key does not exist. |
+| `destination_exists` | 409 | Destination exists and `allowOverwrite` is not `true`. |
+| `etag_conflict` | 409 | Source or destination ETag mismatch. |
+| `payload_too_large` | 413 | Source object size exceeds `MAX_TRANSFER_BYTES`. |
+
+---
+
+## r2_object_rename
+
+Rename an R2 object within its current prefix or move it to an explicit `targetPrefix`. The new name must be a basename — it cannot contain `/` or `\`. Internally delegates to `r2_object_move`.
+
+### Parameters
+
+<ParamField body="currentKey" type="string" required>
+  Relative key of the object to rename.
+</ParamField>
+
+<ParamField body="newName" type="string" required>
+  New basename for the object. Must be at least 1 character, must not contain `/` or `\`, and must differ from the current basename.
+</ParamField>
+
+<ParamField body="confirm" type="true" required>
+  Must be the literal boolean `true`.
+</ParamField>
+
+<ParamField body="targetPrefix" type="string" optional>
+  Explicit destination prefix. When omitted, the parent prefix of `currentKey` is used (the object stays in the same "folder").
+</ParamField>
+
+<ParamField body="allowOverwrite" type="boolean" optional>
+  When `true`, an existing object at the computed destination key will be overwritten. Defaults to `false`.
+</ParamField>
+
+<ParamField body="dryRun" type="boolean" optional>
+  When `true`, no changes are made. Returns a preview of the planned operation.
+</ParamField>
+
+<ParamField body="expectedSourceEtag" type="string" optional>
+  Abort the rename if the source ETag does not match this value.
+</ParamField>
+
+<ParamField body="expectedDestinationEtag" type="string" optional>
+  Abort the destination write if the destination ETag does not match this value.
+</ParamField>
+
+### Returns
+
+**Live run**:
+
+<ResponseField name="sourceKey" type="string" required>
+  The original key that was renamed.
+</ResponseField>
+
+<ResponseField name="deletedSourceKey" type="string" required>
+  The source key that was deleted after the copy.
+</ResponseField>
+
+<ResponseField name="destinationKey" type="string" required>
+  The computed destination key (prefix + newName).
+</ResponseField>
+
+<ResponseField name="destination" type="ObjectMetadata" required>
+  Metadata of the newly written destination object.
+</ResponseField>
+
+**Dry run** (`dryRun: true`):
+
+<ResponseField name="dryRun" type="true" required>
+  Always `true`.
+</ResponseField>
+
+<ResponseField name="operation" type="string" required>
+  Always `"r2_object_rename"`.
+</ResponseField>
+
+<ResponseField name="currentKey" type="string" required>
+  The key that would be renamed.
+</ResponseField>
+
+<ResponseField name="newName" type="string" required>
+  The new basename.
+</ResponseField>
+
+<ResponseField name="targetPrefix" type="string | null" required>
+  The resolved target prefix, or `null` if defaulting to the current parent prefix.
+</ResponseField>
+
+<ResponseField name="steps" type="string[]" required>
+  Ordered list of steps: `["copy current key to renamed destination", "delete current key"]`.
+</ResponseField>
+
+<ResponseField name="allowOverwrite" type="boolean" required>
+  Resolved value of `allowOverwrite`.
+</ResponseField>
+
+<ResponseField name="expectedSourceEtag" type="string | null" required>
+  Value of `expectedSourceEtag`, or `null` if not supplied.
+</ResponseField>
+
+<ResponseField name="expectedDestinationEtag" type="string | null" required>
+  Value of `expectedDestinationEtag`, or `null` if not supplied.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `no_op_rename` | 400 | `newName` is identical to the current object's basename. |
+| `invalid_path` | 400 | `newName` contains `/`, `\`, null bytes, or is empty after trimming. |
+| `object_not_found` | 404 | Source key does not exist. |
+| `destination_exists` | 409 | Destination exists and `allowOverwrite` is not `true`. |
+| `etag_conflict` | 409 | Source or destination ETag mismatch. |
+
+---
+
+## ObjectMetadata type
+
+All metadata-returning tools share this shape.
+
+<ResponseField name="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ResponseField>
+
+<ResponseField name="size" type="number" required>
+  Object size in bytes.
+</ResponseField>
+
+<ResponseField name="contentType" type="string | null" required>
+  MIME type stored with the object, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="etag" type="string" required>
+  ETag of the stored object.
+</ResponseField>
+
+<ResponseField name="lastModified" type="string | null" required>
+  ISO 8601 UTC timestamp of the last write (`uploaded` field from the R2 API), or `null` if unavailable.
+</ResponseField>
+
+<ResponseField name="customMetadata" type="object" required>
+  Arbitrary string key-value pairs attached to the object. Empty object `{}` when none are set.
+</ResponseField>
+
+---
+
+## Error Codes
+
+The following `R2McpError` codes can be returned by object tools. Each error carries a machine-readable `code`, an HTTP `status`, a human-readable `message`, and optional `details`.
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `object_not_found` | 404 | Object key not found in R2. |
+| `unsupported_content_type` | 415 | Object content type is not text-like. Use `r2_download_base64` for binary objects. |
+| `payload_too_large` | 413 | Object or text payload exceeds `MAX_INLINE_TEXT_BYTES` or `MAX_TRANSFER_BYTES`. |
+| `etag_conflict` | 409 | A conditional write or copy failed because the stored ETag did not match `expectedEtag`. |
+| `object_already_exists` | 409 | `r2_object_put_if_absent` failed because an object already exists at the key. |
+| `destination_exists` | 409 | Copy or move destination already exists and `allowOverwrite` was not set to `true`. |
+| `no_op_rename` | 400 | The `newName` supplied to `r2_object_rename` is identical to the current basename. |
+| `invalid_path` | 400 | Key contains `..`, a leading `/`, null bytes, or a basename with path separators. |
+| `out_of_scope` | 403 | Key falls outside the configured `R2_ROOT_PREFIX` scope. |

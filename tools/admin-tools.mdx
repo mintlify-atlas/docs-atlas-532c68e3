@@ -1,0 +1,178 @@
+---
+title: "R2 Admin Tools: Read-Only Cloudflare Account Visibility"
+sidebarTitle: "Admin Tools"
+description: "Reference for the 10 read-only R2 admin tools that expose bucket config, CORS, lifecycle, domains, notifications, and metrics via the Cloudflare API."
+---
+
+The 10 read-only admin tools provide visibility into Cloudflare R2 bucket configuration and account-level metrics by querying the Cloudflare API on your behalf. All admin tools are disabled by default and must be activated with `ENABLE_ACCOUNT_TOOLS=true`. No mutating operations — such as creating or deleting buckets, updating CORS rules, or modifying lifecycle policies — are included.
+
+## Prerequisites
+
+Enable admin tools and configure the required environment variables in `wrangler.jsonc`:
+
+```jsonc wrangler.jsonc
+{
+  "vars": {
+    "ENABLE_ACCOUNT_TOOLS": "true",
+    "CLOUDFLARE_ACCOUNT_ID": "<your-account-id>",
+    "R2_BUCKET_NAME": "<your-default-bucket-name>"
+  }
+}
+```
+
+Then add your Cloudflare API token as a secret:
+
+```bash
+npx wrangler secret put CLOUDFLARE_API_TOKEN
+```
+
+<Note>
+  Use the narrowest token scope that covers the R2 resources you need. A token scoped to **R2: Read** for specific buckets is sufficient for all admin tools and reduces the blast radius if the token is compromised.
+</Note>
+
+`R2_BUCKET_NAME` is used as the default bucket for any admin tool that accepts an optional `bucketName` parameter. When a tool call omits `bucketName`, the Worker falls back to this value.
+
+---
+
+## Available Tools
+
+| Tool | Description |
+|---|---|
+| `r2_bucket_list` | Lists R2 buckets in the configured Cloudflare account. Parameters: `cursor` (string), `direction` (`asc` or `desc`), `nameContains` (string), `perPage` (integer, 1–1000). |
+| `r2_bucket_get` | Returns metadata for one R2 bucket. Parameters: `bucketName` (string, optional — defaults to `R2_BUCKET_NAME`). |
+| `r2_cors_get` | Returns the CORS rules configured on one R2 bucket. Parameters: `bucketName` (string, optional). |
+| `r2_lifecycle_get` | Returns the lifecycle rules configured on one R2 bucket. Parameters: `bucketName` (string, optional). |
+| `r2_domain_custom_list` | Lists all custom domains attached to one R2 bucket. Parameters: `bucketName` (string, optional). |
+| `r2_domain_custom_get` | Returns settings for one custom domain on an R2 bucket. Parameters: `bucketName` (string, optional), `domain` (string, required). |
+| `r2_domain_managed_get` | Returns the r2.dev managed domain settings for one R2 bucket. Parameters: `bucketName` (string, optional). |
+| `r2_notifications_list` | Lists all event notification rules configured for one R2 bucket. Parameters: `bucketName` (string, optional). |
+| `r2_notifications_get` | Returns the configuration for one event notification queue on an R2 bucket. Parameters: `bucketName` (string, optional), `queueId` (string, required). |
+| `r2_metrics_get` | Returns account-level R2 storage metrics. No parameters. |
+
+---
+
+## Tool Details
+
+<Accordion title="r2_bucket_list — List R2 Buckets">
+  Lists R2 buckets in the configured Cloudflare account with optional filtering and pagination.
+
+  **Parameters**
+
+  <ParamField query="cursor" type="string">
+    Pagination cursor from a previous response. Optional.
+  </ParamField>
+
+  <ParamField query="direction" type="string">
+    Sort direction: `asc` or `desc`. Optional.
+  </ParamField>
+
+  <ParamField query="nameContains" type="string">
+    Filter to buckets whose names contain this substring. Optional.
+  </ParamField>
+
+  <ParamField query="perPage" type="integer">
+    Number of results per page. Must be between 1 and 1000. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_bucket_get — Get Bucket Metadata">
+  Returns metadata for one R2 bucket, including its creation date, location hint, and storage class.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_cors_get — Get CORS Rules">
+  Returns the Cross-Origin Resource Sharing (CORS) rules configured for one R2 bucket.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_lifecycle_get — Get Lifecycle Rules">
+  Returns the object lifecycle rules for one R2 bucket, including expiration and transition policies.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_domain_custom_list — List Custom Domains">
+  Lists all custom domains (e.g. `cdn.example.com`) currently attached to one R2 bucket.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_domain_custom_get — Get Custom Domain Settings">
+  Returns the configuration for one specific custom domain attached to an R2 bucket.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+
+  <ParamField query="domain" type="string" required>
+    The custom domain to look up (e.g. `cdn.example.com`).
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_domain_managed_get — Get r2.dev Domain Settings">
+  Returns the settings for the Cloudflare-managed `r2.dev` public access domain for one R2 bucket.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_notifications_list — List Event Notification Rules">
+  Lists all event notification rules configured on one R2 bucket, including the queues they target and the event types they capture.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_notifications_get — Get Event Notification Queue Config">
+  Returns the configuration for one specific event notification queue on an R2 bucket.
+
+  **Parameters**
+
+  <ParamField query="bucketName" type="string">
+    The bucket to query. Defaults to `R2_BUCKET_NAME` when omitted. Optional.
+  </ParamField>
+
+  <ParamField query="queueId" type="string" required>
+    The ID of the queue whose notification configuration to retrieve.
+  </ParamField>
+</Accordion>
+
+<Accordion title="r2_metrics_get — Get Account R2 Metrics">
+  Returns account-level R2 storage metrics including total object count and storage bytes consumed. This tool takes no parameters.
+</Accordion>
+
+---
+
+## Scope Note
+
+All admin tools are read-only by design. The Worker does not expose any tool for creating or deleting buckets, modifying CORS or lifecycle configurations, attaching or detaching domains, creating or deleting notification rules, or any other mutating operation against the Cloudflare API.
+
+This design ensures that the `CLOUDFLARE_API_TOKEN` used by the Worker never needs write permissions on your account. A token with **R2: Read** access is sufficient.
+
+For full parameter details and API response schemas, see the [Admin Tool Reference](/reference/admin-tool-reference).

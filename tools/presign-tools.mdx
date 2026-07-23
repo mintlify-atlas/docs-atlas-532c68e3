@@ -1,0 +1,110 @@
+---
+title: "R2 Presign Tools: Generate Temporary S3 URLs for R2"
+sidebarTitle: "Presign Tools"
+description: "Reference for r2_presign_get and r2_presign_put, which generate temporary S3-compatible URLs for direct large-file access to Cloudflare R2."
+---
+
+The presign tools generate temporary S3-compatible URLs that allow clients to read from or write to R2 directly, without routing the payload through the Worker. This makes them the right choice for objects larger than `MAX_TRANSFER_BYTES` or any scenario where bypassing the Worker for throughput is desirable. Presign tools are disabled by default and must be enabled explicitly with `ENABLE_PRESIGN_TOOLS=true`.
+
+## Prerequisites
+
+Before using presign tools, configure the following in `wrangler.jsonc` and your Worker secrets:
+
+```jsonc wrangler.jsonc
+{
+  "vars": {
+    "ENABLE_PRESIGN_TOOLS": "true",
+    "R2_BUCKET_NAME": "<your-bucket-name>",
+    "CLOUDFLARE_ACCOUNT_ID": "<your-account-id>"
+  }
+}
+```
+
+Then set the R2 S3-compatible credentials as secrets:
+
+```bash
+npx wrangler secret put R2_ACCESS_KEY_ID
+npx wrangler secret put R2_SECRET_ACCESS_KEY
+```
+
+<Note>
+  `R2_S3_ENDPOINT` is optional. When not set, it is derived automatically from `CLOUDFLARE_ACCOUNT_ID` as `https://<account-id>.r2.cloudflarestorage.com`. Set it explicitly only if you need to override this value.
+</Note>
+
+You can generate R2 S3-compatible access keys in the Cloudflare dashboard under **R2 → Manage R2 API Tokens**.
+
+---
+
+## r2_presign_get
+
+Generates a temporary presigned GET URL for one R2 object. The URL allows any bearer to download the object directly from R2 without authentication for the duration of the expiration window.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The object key for which to generate a download URL. Relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="expiresInSeconds" type="integer">
+  How long the URL remains valid, in seconds. Must be between 1 and 604800 (7 days). Defaults to 3600 (1 hour). Optional.
+</ParamField>
+
+**Returns:** `{ key: string, url: string, expiresInSeconds: number }`
+
+```json Example
+{
+  "key": "large/archive.zip",
+  "expiresInSeconds": 900
+}
+```
+
+---
+
+## r2_presign_put
+
+Generates a temporary presigned PUT URL for one R2 object. The URL allows any bearer to upload content directly to R2 at the specified key without routing through the Worker.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The destination object key. Relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="contentType" type="string">
+  MIME type to associate with the uploaded object. When provided, the HTTP client must send a matching `Content-Type` header in the PUT request. Optional.
+</ParamField>
+
+<ParamField query="expiresInSeconds" type="integer">
+  How long the URL remains valid, in seconds. Must be between 1 and 604800 (7 days). Defaults to 3600 (1 hour). Optional.
+</ParamField>
+
+**Returns:** `{ key: string, url: string, contentType?: string, expiresInSeconds: number }`
+
+```json Example
+{
+  "key": "uploads/video.mp4",
+  "contentType": "video/mp4",
+  "expiresInSeconds": 3600
+}
+```
+
+---
+
+## Security
+
+Presigned URLs are bearer credentials. Anyone who obtains a URL can use it until it expires.
+
+<Warning>
+  Presigned URLs grant access to the specified R2 object for their full expiration period. Do not include presigned URLs in shared logs, chat transcripts, version control, or any other medium that may be accessible to unintended recipients.
+</Warning>
+
+Follow these practices when working with presigned URLs:
+
+- **Use short expirations** for sensitive or access-controlled content. The default is 1 hour; consider using 15–30 minutes (`900`–`1800` seconds) when the URL is being passed to a short-lived process.
+- **Use the minimum required expiration.** The maximum is 7 days (604,800 seconds). Reserve long-lived URLs for publicly accessible content such as shared downloads.
+- **Scope with `R2_ROOT_PREFIX`.** When `R2_ROOT_PREFIX` is set, the key passed to presign tools is resolved under the root prefix before generating the URL. The client receives the relative key in the response.
+- **Rotate R2 S3 credentials** periodically and revoke them immediately if they are exposed.
+
+<Note>
+  `MAX_TRANSFER_BYTES` does not apply to presigned URL transfers. The payload goes directly between the client and R2 over S3-compatible APIs and never passes through the Worker.
+</Note>

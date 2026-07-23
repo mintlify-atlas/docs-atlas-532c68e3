@@ -1,0 +1,116 @@
+---
+title: "Troubleshoot Common R2 MCP Worker Deployment Issues"
+sidebarTitle: "Troubleshooting"
+description: "Diagnose and fix deployment failures, OAuth errors, missing tools, R2 access problems, and payload size limits in the Cloudflare R2 Remote MCP Worker."
+---
+
+This page covers common failure scenarios you may encounter during deployment, authentication, and tool operation. Each section describes the symptoms and the most likely causes. For a full set of verification steps, see [Verify](/operations/verify).
+
+<AccordionGroup>
+
+  <Accordion title="/healthz fails or returns ok: false">
+    The `/healthz` endpoint returns `ok: false` or an HTTP `503` when the Worker cannot reach the bound R2 bucket.
+
+    **Possible causes:**
+
+    - The `R2_BUCKET` binding is missing from `wrangler.jsonc`. Confirm that the `[[r2_buckets]]` stanza is present and that `binding = "R2_BUCKET"`.
+    - The `bucket_name` value in `wrangler.jsonc` is wrong or the bucket does not exist in your Cloudflare account. Create the bucket first with `wrangler r2 bucket create <name>` before deploying.
+    - Your `wrangler.jsonc` has multiple environments and `wrangler deploy` is targeting the wrong one. Pass `--env <name>` explicitly to select the correct environment.
+    - The Worker was deployed before the R2 bucket was created. Re-deploy after creating the bucket.
+  </Accordion>
+
+  <Accordion title="OAuth fails / 401 errors">
+    The client receives a `401 Unauthorized` response or the OAuth flow fails to complete.
+
+    **Possible causes:**
+
+    - `AUTH_MODE` is not set to `"github"` in `wrangler.jsonc` vars. Without this value, the Worker bypasses OAuth entirely and will reject requests that expect a token.
+    - The `OAUTH_KV` binding is missing from `wrangler.jsonc` or the KV namespace ID is wrong. The OAuth provider uses this namespace to store session state.
+    - `GITHUB_CLIENT_ID` or `GITHUB_CLIENT_SECRET` is missing or incorrect. Confirm both are set as Worker secrets with `wrangler secret put`.
+    - `COOKIE_ENCRYPTION_KEY` is not set as a Worker secret. This key is required for encrypting OAuth session cookies.
+    - The GitHub OAuth App's **Authorization callback URL** does not exactly match `https://<worker-url>/callback`. Even a trailing slash mismatch will cause OAuth to fail. Update the callback URL in the GitHub OAuth App settings to match your deployed Worker URL.
+  </Accordion>
+
+  <Accordion title="Login succeeds but access denied (403)">
+    The GitHub OAuth flow completes successfully, but the Worker returns a `403 Forbidden` response.
+
+    **Possible causes:**
+
+    - The authenticated GitHub login is not listed in `ALLOWED_GITHUB_LOGINS`. Add the login to the comma-separated list in `wrangler.jsonc` vars.
+    - `ALLOWED_GITHUB_LOGINS` is empty or the variable is not set. At least one login must be listed for any user to gain access.
+    - The login appears to have different casing than what is stored. The Worker performs case-insensitive comparison automatically, so casing alone should not cause this error — double-check the exact login string in both places.
+  </Accordion>
+
+  <Accordion title="No tools visible in MCP client">
+    The client connects but `tools/list` returns an empty array, or no tools appear in the client's action/tool panel.
+
+    **Possible causes:**
+
+    - The client is connected to the wrong URL. Verify the endpoint is `/mcp` and not `/healthz` or `/`.
+    - The tool or action definitions have not been refreshed after the Worker was updated. Use the client's refresh or reload option to re-fetch the tool list from the server.
+    - The Worker deployment failed silently. Check the Cloudflare dashboard Workers & Pages logs or review the output of `wrangler deploy` for errors.
+    - The client does not support streamable HTTP remote MCP. Confirm that your client version supports the MCP streamable HTTP transport before connecting to a remote Worker.
+  </Accordion>
+
+  <Accordion title="r2_object_get returns unsupported_content_type error">
+    The `r2_object_get` tool returns an error indicating the content type is not supported.
+
+    **Possible causes:**
+
+    - The object's `Content-Type` is not text-like. `r2_object_get` returns inline text only for types matching `text/*`, `application/json`, `application/xml`, and similar text formats. Binary formats such as images, videos, archives, and compiled files are not eligible for inline text delivery.
+    - Use `r2_download_base64` instead of `r2_object_get` for binary objects. The base64 tool has no content-type restriction.
+  </Accordion>
+
+  <Accordion title="payload_too_large errors">
+    A tool call returns an error indicating the object is too large to transfer.
+
+    **Possible causes:**
+
+    - A text object exceeds `MAX_INLINE_TEXT_BYTES` (default `262144` bytes, 256 KiB). The Worker will not return inline text content above this limit.
+    - A binary object exceeds `MAX_TRANSFER_BYTES` (default `1048576` bytes, 1 MiB). The Worker will not transfer binary content above this limit.
+    - For objects larger than these thresholds, use presigned URLs (`r2_presign_get` or `r2_presign_put`) so the client downloads or uploads directly from R2. Presign tools must be enabled with `ENABLE_PRESIGN_TOOLS=true`.
+  </Accordion>
+
+  <Accordion title="Presign tools not appearing">
+    The `r2_presign_get` and `r2_presign_put` tools are not visible in `tools/list`.
+
+    **Possible causes:**
+
+    - `ENABLE_PRESIGN_TOOLS=true` is not set in the `vars` section of `wrangler.jsonc`. Add it and re-deploy.
+    - `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are not set as Worker secrets. These S3-compatible credentials are required to generate presigned URLs. Create them in the Cloudflare dashboard under **R2 → Manage API tokens** and set them with `wrangler secret put`.
+    - `R2_BUCKET_NAME` is not set in `wrangler.jsonc` vars. The presign implementation requires the bucket name as a string variable in addition to the R2 binding.
+  </Accordion>
+
+  <Accordion title="Account/admin tools not appearing">
+    Account or admin tools such as `r2_account_list_buckets` are not visible in `tools/list`.
+
+    **Possible causes:**
+
+    - `ENABLE_ACCOUNT_TOOLS=true` is not set in the `vars` section of `wrangler.jsonc`. Add it and re-deploy.
+    - `CLOUDFLARE_API_TOKEN` is not set as a Worker secret. This token must have R2 read permissions. Set it with `wrangler secret put CLOUDFLARE_API_TOKEN`.
+    - `CLOUDFLARE_ACCOUNT_ID` is not set in `wrangler.jsonc` vars. The account tools use this value to scope API requests to the correct Cloudflare account.
+  </Accordion>
+
+  <Accordion title="etag_conflict (409) on put">
+    An `r2_object_put` call returns a `409 Conflict` with an `etag_conflict` error code.
+
+    **Possible causes:**
+
+    - The `expectedEtag` parameter was provided but the current object's ETag does not match. This means the object was modified between the time you fetched its metadata and the time you attempted the write.
+    - Re-fetch the object metadata using `r2_object_head` to get the current ETag, then retry the put with the updated value or omit `expectedEtag` if conditional writes are not required.
+  </Accordion>
+
+  <Accordion title="destination_exists (409) on copy or move">
+    An `r2_object_copy` or `r2_object_move` call returns a `409 Conflict` with a `destination_exists` error code.
+
+    **Possible causes:**
+
+    - An object already exists at the destination key and `allowOverwrite` was not set to `true` in the tool call.
+    - Set `allowOverwrite: true` in the tool arguments to permit the overwrite, or choose a different destination key.
+  </Accordion>
+
+</AccordionGroup>
+
+<Note>
+  For the full set of post-deployment verification steps — including static checks, the health endpoint, `tools/list` via MCP Inspector, and the SDK smoke test — see [Verify the R2 MCP Worker Deployment is Healthy](/operations/verify).
+</Note>

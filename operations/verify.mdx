@@ -1,0 +1,131 @@
+---
+title: "Verify the Cloudflare R2 Remote MCP Worker Is Healthy"
+sidebarTitle: "Verify"
+description: "Run static checks, the health endpoint, and MCP tools/list to confirm the Worker compiled, the R2 bucket is accessible, and all expected tools are present."
+---
+
+After deploying, run these checks to confirm the Worker compiled correctly, the R2 bucket is reachable, and the MCP endpoint exposes the expected tools. Each check targets a different layer — static analysis, runtime bucket access, and MCP protocol registration — so all three should pass before you connect a client.
+
+## Static Checks
+
+Static checks confirm the TypeScript project compiles without errors and that the repository contains the expected source files and `package.json` scripts.
+
+```bash
+npm run type-check
+npm run smoke
+```
+
+**Expected output:**
+
+- `type-check` exits with code `0` and no TypeScript errors.
+- `smoke` prints `smoke ok`.
+
+The smoke test reads every required source and documentation file and verifies that the `dev`, `deploy`, `smoke`, and `type-check` scripts exist in `package.json`.
+
+## Health Endpoint
+
+The `/healthz` endpoint confirms that the Worker can load its configuration and reach the bound R2 bucket. Test it locally before deploying, and again against the deployed Worker after `wrangler deploy`.
+
+```bash
+# Local — start the dev server first
+npm run dev
+curl http://localhost:8787/healthz
+
+# Remote
+curl https://<worker-url>/healthz
+```
+
+**Expected response:**
+
+```json
+{
+  "ok": true,
+  "bucketAccessible": true,
+  "authMode": "github",
+  "accountToolsEnabled": false,
+  "presignToolsEnabled": false,
+  "rootPrefix": "",
+  "maxListLimit": 100,
+  "maxInlineTextBytes": 262144,
+  "maxTransferBytes": 1048576
+}
+```
+
+The values of `authMode`, `accountToolsEnabled`, `presignToolsEnabled`, and `rootPrefix` reflect your `wrangler.jsonc` configuration and may differ from the example above.
+
+If `ok` is `false`, the R2 bucket binding is missing from `wrangler.jsonc` or the bucket name is wrong. Check that `R2_BUCKET` is bound and that the bucket was created before deployment.
+
+## MCP tools/list via MCP Inspector
+
+`tools/list` verifies that the MCP endpoint is reachable and that the Worker registered its tools successfully at startup.
+
+```bash
+npx @modelcontextprotocol/inspector@latest
+```
+
+Connect to the Worker endpoint:
+
+```text
+https://<worker-url>/mcp
+```
+
+**Expected behavior with `AUTH_MODE=github`:**
+
+- OAuth opens in a browser tab.
+- GitHub login completes.
+- The GitHub login must be listed in `ALLOWED_GITHUB_LOGINS`.
+- `tools/list` returns the enabled tool set.
+
+## Expected Default Tool Names
+
+With default feature flags (`ENABLE_ACCOUNT_TOOLS` and `ENABLE_PRESIGN_TOOLS` both unset or `false`), `tools/list` should return exactly these twelve tools:
+
+```text
+r2_download_base64
+r2_object_copy
+r2_object_delete
+r2_object_delete_many
+r2_object_get
+r2_object_head
+r2_object_list
+r2_object_move
+r2_object_put
+r2_object_put_if_absent
+r2_object_rename
+r2_upload_base64
+```
+
+<Note>
+  Setting `ENABLE_ACCOUNT_TOOLS=true` in `wrangler.jsonc` adds read-only admin tools to the list. Setting `ENABLE_PRESIGN_TOOLS=true` adds presigned URL tools. Both sets appear alongside the default twelve tools.
+</Note>
+
+## SDK tools/list Smoke (Local, AUTH_MODE=none)
+
+For local development with `AUTH_MODE=none`, you can verify the tool list programmatically using the MCP SDK without a browser OAuth flow. Start the Worker first, then run the inline script:
+
+```bash
+npm run dev
+```
+
+```bash
+node --input-type=module <<'EOF'
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const client = new Client({ name: "r2-mcp-verify", version: "0.0.0" });
+const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:8787/mcp"));
+await client.connect(transport);
+const tools = await client.listTools();
+console.log(JSON.stringify(tools.tools.map((tool) => tool.name).sort(), null, 2));
+await client.close();
+EOF
+```
+
+The output is a sorted JSON array of tool names. Confirm that the array includes at minimum:
+
+```text
+r2_download_base64
+r2_object_get
+r2_object_list
+r2_object_put
+```

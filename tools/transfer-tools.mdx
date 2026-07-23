@@ -1,0 +1,119 @@
+---
+title: "R2 Transfer Tools: Upload and Download Binary Objects"
+sidebarTitle: "Transfer Tools"
+description: "Reference for r2_upload_base64 and r2_download_base64, the MCP tools for uploading and downloading binary R2 objects using base64 encoding."
+---
+
+The two transfer tools enable uploading and downloading binary objects through the MCP interface using base64 encoding. Both tools are always enabled alongside the object tools and require only the `R2_BUCKET` binding. All transfers are bounded by `MAX_TRANSFER_BYTES` (default 1,048,576 bytes). When `R2_ROOT_PREFIX` is configured, keys are resolved relative to that prefix.
+
+## r2_upload_base64
+
+Uploads a binary payload to R2 by accepting the raw bytes as a base64-encoded string. The Worker decodes the base64 value and stores the resulting bytes as the object body. The decoded size must not exceed `MAX_TRANSFER_BYTES`.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The destination object key, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+<ParamField query="contentBase64" type="string" required>
+  The object body as a base64-encoded string. The decoded byte length must not exceed `MAX_TRANSFER_BYTES`.
+</ParamField>
+
+<ParamField query="contentType" type="string">
+  MIME type to store with the object (e.g. `image/png`, `application/zip`). Optional.
+</ParamField>
+
+<ParamField query="customMetadata" type="object">
+  Key-value string pairs stored as R2 object metadata. Optional.
+</ParamField>
+
+<ParamField query="expectedEtag" type="string">
+  If provided, the upload only proceeds when the existing object ETag matches this value. Returns a 409 error on mismatch. Optional.
+</ParamField>
+
+**Returns:** `ObjectMetadata`
+
+```json
+{
+  "key": "string",
+  "size": 0,
+  "contentType": "string",
+  "etag": "string",
+  "lastModified": "string",
+  "customMetadata": {}
+}
+```
+
+```json Example
+{
+  "key": "images/photo.png",
+  "contentBase64": "<base64-encoded-bytes>",
+  "contentType": "image/png"
+}
+```
+
+---
+
+## r2_download_base64
+
+Downloads an R2 object and returns its body as a base64-encoded string along with metadata. The object size must not exceed `MAX_TRANSFER_BYTES`. The response includes a `filename` field derived from the basename of the object key, which is useful for saving the file on the client side.
+
+**Parameters**
+
+<ParamField query="key" type="string" required>
+  The object key to download, relative to `R2_ROOT_PREFIX` when set.
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "key": "string",
+  "contentBase64": "string",
+  "contentType": "string",
+  "etag": "string",
+  "size": 0,
+  "lastModified": "string",
+  "filename": "string"
+}
+```
+
+```json Example
+{
+  "key": "images/photo.png"
+}
+```
+
+---
+
+## Size Limits
+
+Both transfer tools enforce `MAX_TRANSFER_BYTES` (default **1,048,576 bytes / 1 MB**). The check is applied to the decoded byte length on upload and to the stored object size on download.
+
+The limit is configurable via the `MAX_TRANSFER_BYTES` environment variable in `wrangler.jsonc`:
+
+```jsonc wrangler.jsonc
+{
+  "vars": {
+    "MAX_TRANSFER_BYTES": "5242880"
+  }
+}
+```
+
+<Note>
+  For objects larger than `MAX_TRANSFER_BYTES`, use presigned URLs instead. `r2_presign_get` and `r2_presign_put` generate temporary S3-compatible URLs for direct transfers that bypass the Worker entirely and are not subject to this limit. See [Presign Tools](/tools/presign-tools).
+</Note>
+
+---
+
+## When to Use Transfer Tools vs. Text Tools
+
+| Scenario | Recommended tool |
+|---|---|
+| Reading or writing plain text, JSON, YAML, or other text-like content | `r2_object_get` / `r2_object_put` |
+| Reading or writing binary payloads (images, archives, compiled assets) | `r2_download_base64` / `r2_upload_base64` |
+| Transferring files larger than `MAX_TRANSFER_BYTES` | `r2_presign_get` / `r2_presign_put` |
+| Checking whether an object exists before transferring it | `r2_object_head` |
+
+The object text tools (`r2_object_get` and `r2_object_put`) operate on UTF-8 strings and are bounded by `MAX_INLINE_TEXT_BYTES` (default 262,144 bytes). The transfer tools accept any content type and are bounded by the larger `MAX_TRANSFER_BYTES` limit, but they require the caller to handle base64 encoding and decoding.

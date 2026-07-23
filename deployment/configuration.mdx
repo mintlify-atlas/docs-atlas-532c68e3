@@ -1,0 +1,111 @@
+---
+title: "Configure the R2 MCP Worker: Variables and Bindings"
+sidebarTitle: "Configuration"
+description: "Reference for all wrangler.jsonc bindings, environment variables, feature flags, and secrets that control the R2 MCP Worker's runtime behaviour."
+---
+
+This page is a complete reference for every binding, environment variable, feature flag, and secret the R2 MCP Worker reads at runtime. All variables live in `wrangler.jsonc` under the `vars` block (non-sensitive values) or are pushed as Wrangler secrets (sensitive values). The full `wrangler.example.jsonc` template is reproduced at the bottom of this page.
+
+<Note>
+  `wrangler.jsonc` is listed in `.gitignore` and must never be committed to source control. Copy `wrangler.example.jsonc` to `wrangler.jsonc` locally and fill in real values there.
+</Note>
+
+## Wrangler bindings
+
+Bindings are declared in `wrangler.jsonc` and injected into the Worker's `Env` interface at runtime.
+
+| Binding | Type | Required | Description |
+|---|---|---|---|
+| `R2_BUCKET` | `R2Bucket` | Always | The bound R2 bucket. All object read/write tools operate through this binding. |
+| `OAUTH_KV` | `KVNamespace` | When `AUTH_MODE=github` | KV namespace used to store short-lived OAuth state tokens during the authorization callback flow. |
+
+## Core variables
+
+These values are set under `vars` in `wrangler.jsonc`. They are not secret and are visible in the Wrangler config file.
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `AUTH_MODE` | `"github"` \| `"none"` | `"github"` | Authentication mode. Use `"github"` for all public deployments. Use `"none"` only for local development or deployments protected by an external layer. |
+| `ALLOWED_GITHUB_LOGINS` | `string` | — | Comma-separated list of GitHub usernames permitted to authenticate. All other GitHub accounts are rejected. Only used when `AUTH_MODE=github`. |
+| `R2_BUCKET_NAME` | `string` | — | The name of the bound R2 bucket. Must match `r2_buckets[0].bucket_name`. Used by account tools and presign tools to identify the bucket. |
+| `R2_ROOT_PREFIX` | `string` | `""` | Optional key prefix that scopes all R2 operations to a virtual subdirectory. For example, setting `"data"` restricts the Worker to keys starting with `data/`. |
+| `MAX_INLINE_TEXT_BYTES` | `integer` | `262144` | Maximum number of bytes for text object content to be returned inline in a tool response. Objects larger than this threshold are not inlined. |
+| `MAX_TRANSFER_BYTES` | `integer` | `1048576` | Maximum number of bytes permitted in a single R2 read or write operation. Requests exceeding this limit are rejected. |
+| `MAX_LIST_LIMIT` | `integer` | `100` | Maximum number of objects returned per R2 list operation. |
+| `ENABLE_ACCOUNT_TOOLS` | `"true"` \| `"false"` | `"false"` | Set to `"true"` to enable read-only Cloudflare account API tools that surface R2 bucket metadata. Requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. |
+| `ENABLE_PRESIGN_TOOLS` | `"true"` \| `"false"` | `"false"` | Set to `"true"` to enable presigned URL generation tools. Requires `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and either `R2_S3_ENDPOINT` or `CLOUDFLARE_ACCOUNT_ID`. |
+
+## Secrets
+
+Secrets are stored outside `wrangler.jsonc` and pushed to Cloudflare with `npx wrangler secret put`. They are never written to disk or included in deployments as plaintext.
+
+| Secret | Required | Description |
+|---|---|---|
+| `GITHUB_CLIENT_ID` | When `AUTH_MODE=github` | OAuth App client ID from your GitHub OAuth App settings. |
+| `GITHUB_CLIENT_SECRET` | When `AUTH_MODE=github` | OAuth App client secret from your GitHub OAuth App settings. |
+| `COOKIE_ENCRYPTION_KEY` | When `AUTH_MODE=github` | Key used to encrypt session cookies. Must be at least 32 random bytes. |
+| `CLOUDFLARE_API_TOKEN` | When `ENABLE_ACCOUNT_TOOLS=true` | Cloudflare API token with read access to R2 resources. Use the narrowest scope sufficient for the deployment. |
+| `R2_ACCESS_KEY_ID` | When `ENABLE_PRESIGN_TOOLS=true` | R2 S3-compatible API access key ID, used to sign presigned URLs. |
+| `R2_SECRET_ACCESS_KEY` | When `ENABLE_PRESIGN_TOOLS=true` | R2 S3-compatible API secret access key, used to sign presigned URLs. |
+
+<Tip>
+  Generate a strong `COOKIE_ENCRYPTION_KEY` value with:
+
+  ```bash
+  openssl rand -base64 32
+  ```
+</Tip>
+
+## Optional S3 / presign variables
+
+These variables are only read when `ENABLE_PRESIGN_TOOLS=true`.
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `R2_S3_ENDPOINT` | `string` | Derived from `CLOUDFLARE_ACCOUNT_ID` | Full S3-compatible endpoint URL for R2. If omitted, the Worker derives it as `https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com`. |
+| `R2_S3_REGION` | `string` | `"auto"` | S3 region string passed to the AWS SDK when generating presigned URLs. Cloudflare R2 accepts `"auto"`. |
+| `CLOUDFLARE_ACCOUNT_ID` | `string` | — | Your Cloudflare account ID. Used to derive `R2_S3_ENDPOINT` when that variable is not set explicitly, and required by account tools. |
+
+## Full wrangler.example.jsonc
+
+Use this file as the starting point for your `wrangler.jsonc`. Replace placeholder values with your real bucket names, KV namespace ID, GitHub logins, and feature flag settings.
+
+```jsonc
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-r2-remote-mcp-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "r2_buckets": [
+    {
+      "binding": "R2_BUCKET",
+      "bucket_name": "example-bucket",
+      "preview_bucket_name": "example-bucket-preview"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "vars": {
+    "AUTH_MODE": "github",
+    "ALLOWED_GITHUB_LOGINS": "your-github-login",
+    "R2_BUCKET_NAME": "example-bucket",
+    "R2_ROOT_PREFIX": "",
+    "MAX_INLINE_TEXT_BYTES": "262144",
+    "MAX_TRANSFER_BYTES": "1048576",
+    "MAX_LIST_LIMIT": "100",
+    "ENABLE_ACCOUNT_TOOLS": "false",
+    "ENABLE_PRESIGN_TOOLS": "false"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "dev": {
+    "port": 8787
+  }
+}
+```

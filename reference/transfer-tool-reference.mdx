@@ -1,0 +1,162 @@
+---
+title: "Transfer Tool Reference: Base64 Upload and Download"
+sidebarTitle: "Transfer Tools"
+description: "Complete parameter and return-type reference for r2_upload_base64 and r2_download_base64, including size limits, encoding details, and R2McpError codes."
+---
+
+This page is the complete parameter and return-type reference for the two binary transfer tools: `r2_upload_base64` and `r2_download_base64`. Both tools operate on raw bytes encoded as base64, making them suitable for any object regardless of content type. All transfers are bounded by `MAX_TRANSFER_BYTES` (default 1 MiB).
+
+---
+
+## r2_upload_base64
+
+Upload raw bytes to an R2 object by passing the content as a base64-encoded string. Optionally supply `expectedEtag` for a conditional write.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`. Must not contain `..`, null bytes, or be an absolute path.
+</ParamField>
+
+<ParamField body="contentBase64" type="string" required>
+  Base64-encoded bytes to store. The encoded string length must not exceed `ceil(MAX_TRANSFER_BYTES / 3) * 4` characters, and the decoded byte length must not exceed `MAX_TRANSFER_BYTES` (default 1 MiB). Both checks are applied before the write.
+</ParamField>
+
+<ParamField body="contentType" type="string" optional>
+  MIME type to store with the object (e.g. `image/png`, `application/pdf`). When omitted, no `Content-Type` header is set.
+</ParamField>
+
+<ParamField body="customMetadata" type="object" optional>
+  Arbitrary string key-value pairs to attach as custom metadata.
+</ParamField>
+
+<ParamField body="expectedEtag" type="string" optional>
+  Conditional write guard. The write is rejected with `etag_conflict` if the current stored ETag does not match this value. Use `"*"` to require that the object already exists.
+</ParamField>
+
+### Returns
+
+Returns the [ObjectMetadata](/reference/object-tool-reference#objectmetadata-type) of the newly written object.
+
+<ResponseField name="key" type="string" required>
+  Relative key of the written object.
+</ResponseField>
+
+<ResponseField name="size" type="number" required>
+  Stored size in bytes (decoded byte count).
+</ResponseField>
+
+<ResponseField name="contentType" type="string | null" required>
+  MIME type stored with the object, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="etag" type="string" required>
+  ETag of the stored object.
+</ResponseField>
+
+<ResponseField name="lastModified" type="string | null" required>
+  ISO 8601 UTC timestamp of the write.
+</ResponseField>
+
+<ResponseField name="customMetadata" type="object" required>
+  Custom metadata key-value pairs attached to the object.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `payload_too_large` | 413 | Encoded string exceeds `ceil(MAX_TRANSFER_BYTES / 3) * 4` characters, or decoded bytes exceed `MAX_TRANSFER_BYTES`. |
+| `etag_conflict` | 409 | Conditional write failed — stored ETag did not match `expectedEtag`. |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |
+
+---
+
+## r2_download_base64
+
+Download an R2 object and return its bytes as a base64-encoded string together with metadata. Works with any content type, including binary objects. The object size is checked against `MAX_TRANSFER_BYTES` before fetching.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ParamField>
+
+### Returns
+
+<ResponseField name="key" type="string" required>
+  Relative key of the downloaded object.
+</ResponseField>
+
+<ResponseField name="contentBase64" type="string" required>
+  Base64-encoded bytes of the object body.
+</ResponseField>
+
+<ResponseField name="contentType" type="string | null" required>
+  MIME type stored with the object, or `null` if not set.
+</ResponseField>
+
+<ResponseField name="etag" type="string" required>
+  ETag of the stored object.
+</ResponseField>
+
+<ResponseField name="size" type="number" required>
+  Object size in bytes (before base64 encoding).
+</ResponseField>
+
+<ResponseField name="lastModified" type="string | null" required>
+  ISO 8601 UTC timestamp of the last write, or `null` if unavailable.
+</ResponseField>
+
+<ResponseField name="filename" type="string" required>
+  Basename of the key (the final path segment after the last `/`). Useful for prompting a file-save dialog or naming a downloaded file.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `object_not_found` | 404 | No object exists at the given key. |
+| `payload_too_large` | 413 | Object size exceeds `MAX_TRANSFER_BYTES`. |
+
+---
+
+## Size Limit Calculation
+
+Both tools enforce `MAX_TRANSFER_BYTES` (default `1_048_576` bytes, configurable via the `MAX_TRANSFER_BYTES` environment variable).
+
+<Note>
+  `MAX_TRANSFER_BYTES` is expressed in **decoded bytes**, not base64 characters.
+</Note>
+
+### Upload size checks
+
+`r2_upload_base64` applies two sequential checks before writing to R2:
+
+1. **Encoded length check** — the base64 string length must not exceed `ceil(MAX_TRANSFER_BYTES / 3) * 4` characters. This is a fast pre-check to avoid decoding large strings unnecessarily.
+2. **Decoded byte check** — the decoded `Uint8Array` byte length must not exceed `MAX_TRANSFER_BYTES`. This guards against padded or non-standard base64 strings that pass the length check but decode to oversized payloads.
+
+Both checks throw `payload_too_large` (HTTP 413) on failure.
+
+### Download size check
+
+`r2_download_base64` calls `r2_object_head` first to read the stored `size` field and compares it against `MAX_TRANSFER_BYTES`. If the object is too large, the tool raises `payload_too_large` without fetching the body.
+
+### Base64 expansion factor
+
+Base64 encoding expands binary data by approximately **4/3** (33%). A `MAX_TRANSFER_BYTES` value of 1 MiB (1,048,576 bytes) allows a maximum encoded string of approximately 1.33 MiB (1,398,104 characters).
+
+```
+max_base64_chars = ceil(MAX_TRANSFER_BYTES / 3) * 4
+```
+
+---
+
+## Error Codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `payload_too_large` | 413 | Object or payload exceeds `MAX_TRANSFER_BYTES`. |
+| `object_not_found` | 404 | Object key not found in R2. |
+| `etag_conflict` | 409 | Conditional write ETag mismatch (`r2_upload_base64` only). |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid (`r2_upload_base64` only). |

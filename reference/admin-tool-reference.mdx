@@ -1,0 +1,226 @@
+---
+title: "Admin Tool Reference: Read-Only R2 Account API Tools"
+sidebarTitle: "Admin Tools"
+description: "Complete parameter reference for the 10 read-only R2 admin tools that query the Cloudflare Account API for bucket configuration, domains, notifications, and metrics."
+---
+
+This page is the complete parameter reference for the 10 read-only admin tools registered by the Cloudflare R2 Remote MCP Worker. All tools call the Cloudflare Account REST API (`GET https://api.cloudflare.com/client/v4/accounts/{accountId}/...`) and return the raw API response.
+
+<Warning>
+  All admin tools require `ENABLE_ACCOUNT_TOOLS=true`, a valid `CLOUDFLARE_ACCOUNT_ID`, and a `CLOUDFLARE_API_TOKEN` with R2 read permissions. Calls made without these will return a `account_tools_disabled` or `account_config_missing` error.
+</Warning>
+
+<Note>
+  All tools in this group are **read-only**. No admin tool modifies bucket configuration, domains, notifications, or any other account resource.
+</Note>
+
+---
+
+## r2_bucket_list
+
+List all R2 buckets in the configured Cloudflare account. Supports pagination and filtering.
+
+**API endpoint:** `GET /r2/buckets`
+
+### Parameters
+
+<ParamField query="cursor" type="string" optional>
+  Opaque pagination cursor returned in a previous response. Pass this to fetch the next page of buckets.
+</ParamField>
+
+<ParamField query="direction" type="string" optional>
+  Sort direction for the result set. Accepted values: `"asc"` or `"desc"`.
+</ParamField>
+
+<ParamField query="nameContains" type="string" optional>
+  Filter results to buckets whose names contain this substring. Sent to the API as the `name_contains` query parameter.
+</ParamField>
+
+<ParamField query="perPage" type="integer" optional>
+  Number of buckets to return per page. Must be between `1` and `1000`.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response containing a list of bucket objects with metadata (name, creation date, location, etc.).
+
+---
+
+## r2_bucket_get
+
+Get metadata for a single R2 bucket.
+
+**API endpoint:** `GET /r2/buckets/{bucketName}`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Name of the bucket to retrieve. Defaults to the value of `R2_BUCKET_NAME` when omitted. Raises `bucket_name_missing` if neither is provided.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API bucket object including name, creation timestamp, location, and storage class.
+
+---
+
+## r2_cors_get
+
+Get the CORS rules configured for an R2 bucket.
+
+**API endpoint:** `GET /r2/buckets/{bucketName}/cors`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response containing the array of CORS rule objects for the bucket.
+
+---
+
+## r2_lifecycle_get
+
+Get the object lifecycle rules configured for an R2 bucket.
+
+**API endpoint:** `GET /r2/buckets/{bucketName}/lifecycle`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response containing the array of lifecycle rule objects.
+
+---
+
+## r2_domain_custom_list
+
+List all custom domains attached to an R2 bucket.
+
+**API endpoint:** `GET /r2/buckets/{bucketName}/domains/custom`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response containing an array of custom domain objects, each including the domain name, zone, and enabled status.
+
+---
+
+## r2_domain_custom_get
+
+Get configuration for a specific custom domain attached to an R2 bucket.
+
+**API endpoint:** `GET /r2/buckets/{bucketName}/domains/custom/{domain}`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted.
+</ParamField>
+
+<ParamField query="domain" type="string" required>
+  The custom domain to look up (e.g. `assets.example.com`). The value is URL-encoded before being appended to the API path.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response for the specified custom domain, including zone information and enabled status.
+
+---
+
+## r2_domain_managed_get
+
+Get the r2.dev managed domain settings for an R2 bucket. The managed domain is the public `*.r2.dev` URL that Cloudflare provides for each bucket.
+
+**API endpoint:** `GET /r2/buckets/{bucketName}/domains/managed`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response describing whether the managed `r2.dev` domain is enabled and the resolved public URL.
+
+---
+
+## r2_notifications_list
+
+List all event notification rules configured for an R2 bucket. Event notifications are delivered to Cloudflare Queues when objects are created, deleted, or otherwise modified.
+
+**API endpoint:** `GET /event_notifications/r2/{bucketName}/configuration`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted. The value is URL-encoded before being inserted into the path.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response containing the complete event notification configuration, including all queue bindings and their associated rules.
+
+---
+
+## r2_notifications_get
+
+Get the event notification configuration for a specific Cloudflare Queue bound to an R2 bucket.
+
+**API endpoint:** `GET /event_notifications/r2/{bucketName}/configuration/queues/{queueId}`
+
+### Parameters
+
+<ParamField query="bucketName" type="string" optional>
+  Target bucket name. Defaults to `R2_BUCKET_NAME` when omitted.
+</ParamField>
+
+<ParamField query="queueId" type="string" required>
+  The ID of the Cloudflare Queue whose notification rules you want to retrieve. The value is URL-encoded before being inserted into the path.
+</ParamField>
+
+### Returns
+
+The raw Cloudflare API response describing the notification rules for the specified queue, including event types and optional prefix/suffix filters.
+
+---
+
+## r2_metrics_get
+
+Get account-level R2 storage metrics. Returns aggregate usage data across all buckets in the account — not limited to `R2_BUCKET_NAME`.
+
+**API endpoint:** `GET /r2/metrics`
+
+### Parameters
+
+This tool accepts no parameters.
+
+### Returns
+
+The raw Cloudflare API response containing account-level R2 storage and request metrics.
+
+---
+
+## Common Error Codes
+
+All admin tools share the following error codes in addition to any API-specific errors.
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `account_tools_disabled` | 403 | `ENABLE_ACCOUNT_TOOLS` is not set to `true`. |
+| `account_config_missing` | 500 | `CLOUDFLARE_ACCOUNT_ID` or `CLOUDFLARE_API_TOKEN` is not configured. |
+| `bucket_name_missing` | 400 | No `bucketName` was provided and `R2_BUCKET_NAME` is not set. |
+| `cloudflare_api_error` | varies | The Cloudflare Account API returned a non-2xx response. The error details include the upstream status code and response body. |

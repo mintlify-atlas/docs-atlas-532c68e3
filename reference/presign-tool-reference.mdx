@@ -1,0 +1,147 @@
+---
+title: "Presign Tool Reference: Temporary S3 URL Generation"
+sidebarTitle: "Presign Tools"
+description: "Complete parameter and return-type reference for r2_presign_get and r2_presign_put, including expiry range, S3 client configuration, and required environment variables."
+---
+
+This page is the complete parameter and return-type reference for `r2_presign_get` and `r2_presign_put`. Both tools generate temporary presigned S3-compatible URLs for Cloudflare R2 objects, allowing clients to upload or download directly without routing through the MCP worker.
+
+<Warning>
+  Presign tools are disabled by default. Set `ENABLE_PRESIGN_TOOLS=true` and configure the required S3 credentials before using these tools. Calls to either tool without the feature flag will return a `presign_tools_disabled` error.
+</Warning>
+
+---
+
+## r2_presign_get
+
+Generate a presigned GET URL for a single R2 object. The URL grants time-limited read access to the object directly from R2's S3-compatible endpoint, without requiring authentication headers in the request.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`. The scoped key is passed to the S3 `GetObjectCommand`.
+</ParamField>
+
+<ParamField body="expiresInSeconds" type="integer" optional>
+  Lifetime of the presigned URL in seconds. Must be an integer between `1` and `604800` (7 days). Defaults to `3600` (1 hour) when omitted.
+</ParamField>
+
+### Returns
+
+<ResponseField name="key" type="string" required>
+  The relative key as passed in the request (not the scoped key).
+</ResponseField>
+
+<ResponseField name="url" type="string" required>
+  Presigned GET URL. Valid for `expiresInSeconds` seconds from the time of generation. The URL embeds credentials in query parameters and does not require an `Authorization` header.
+</ResponseField>
+
+<ResponseField name="expiresInSeconds" type="number" required>
+  The resolved expiry duration used to sign the URL. Reflects the default of `3600` when the input was omitted.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `presign_tools_disabled` | 403 | `ENABLE_PRESIGN_TOOLS` is not set to `true`. |
+| `presign_config_missing` | 500 | One or more of `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, or the S3 endpoint is missing. |
+| `invalid_expiration` | 400 | `expiresInSeconds` is not an integer or is outside the 1–604800 range. |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |
+
+---
+
+## r2_presign_put
+
+Generate a presigned PUT URL for a single R2 object. The URL allows a client to upload an object directly to R2 without routing through the MCP worker. When `contentType` is supplied, it is embedded in the presigned command and the upload request must set the matching `Content-Type` header.
+
+### Parameters
+
+<ParamField body="key" type="string" required>
+  Relative object key, scoped to `R2_ROOT_PREFIX`.
+</ParamField>
+
+<ParamField body="contentType" type="string" optional>
+  MIME type to associate with the uploaded object (e.g. `image/jpeg`, `application/pdf`). When provided, the `Content-Type` is embedded in the `PutObjectCommand` that is signed, and the upload request must include the matching header.
+</ParamField>
+
+<ParamField body="expiresInSeconds" type="integer" optional>
+  Lifetime of the presigned URL in seconds. Must be an integer between `1` and `604800` (7 days). Defaults to `3600` (1 hour) when omitted.
+</ParamField>
+
+### Returns
+
+<ResponseField name="key" type="string" required>
+  The relative key as passed in the request.
+</ResponseField>
+
+<ResponseField name="url" type="string" required>
+  Presigned PUT URL. Valid for `expiresInSeconds` seconds from the time of generation.
+</ResponseField>
+
+<ResponseField name="contentType" type="string">
+  The MIME type embedded in the signed command. Present only when `contentType` was supplied in the request.
+</ResponseField>
+
+<ResponseField name="expiresInSeconds" type="number" required>
+  The resolved expiry duration used to sign the URL.
+</ResponseField>
+
+### Error codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `presign_tools_disabled` | 403 | `ENABLE_PRESIGN_TOOLS` is not set to `true`. |
+| `presign_config_missing` | 500 | One or more of `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, or the S3 endpoint is missing. |
+| `invalid_expiration` | 400 | `expiresInSeconds` is not an integer or is outside the 1–604800 range. |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |
+
+---
+
+## Expiry Range
+
+<Info>
+  The minimum expiry is **1 second**. The maximum is **604800 seconds (7 days)**. The default when `expiresInSeconds` is omitted is **3600 seconds (1 hour)**.
+</Info>
+
+The `expiresInSeconds` validation is enforced by the `expiresIn` helper in `src/r2/presign.ts` before the S3 client is constructed. An out-of-range value raises `invalid_expiration` (HTTP 400).
+
+```
+1 second  ≤  expiresInSeconds  ≤  604800 seconds (7 days)
+default = 3600 seconds (1 hour)
+```
+
+---
+
+## S3 Client Configuration
+
+Both tools construct an `S3Client` from the `@aws-sdk/client-s3` package using the following resolved configuration:
+
+<Accordion title="S3Client constructor parameters">
+
+| Parameter | Source | Notes |
+|-----------|--------|-------|
+| `endpoint` | `R2_S3_ENDPOINT` env var, or derived as `https://{CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com` | Required. Derived automatically when `CLOUDFLARE_ACCOUNT_ID` is set and `R2_S3_ENDPOINT` is not. |
+| `region` | `R2_S3_REGION` env var | Defaults to `"auto"` when not set. |
+| `credentials.accessKeyId` | `R2_ACCESS_KEY_ID` env var | Required. |
+| `credentials.secretAccessKey` | `R2_SECRET_ACCESS_KEY` env var | Required. |
+| `forcePathStyle` | hardcoded `true` | Required for R2 S3-compatible API compatibility. |
+
+</Accordion>
+
+A new `S3Client` instance is created on every presign call — there is no connection pooling. The presigned URL is generated using `@aws-sdk/s3-request-presigner`'s `getSignedUrl` helper and returned directly without making a network request to R2.
+
+<Note>
+  The S3 client is only used to sign URLs. No object existence check is performed during presign. A presigned GET URL for a non-existent key will succeed at signing time but return an error when the URL is used.
+</Note>
+
+---
+
+## Error Codes
+
+| Code | HTTP Status | Meaning |
+|------|-------------|---------|
+| `presign_tools_disabled` | 403 | `ENABLE_PRESIGN_TOOLS` environment variable is not set to `true`. |
+| `presign_config_missing` | 500 | `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, or the resolved S3 endpoint is missing. |
+| `invalid_expiration` | 400 | `expiresInSeconds` is not a positive integer or is outside the 1–604800 range. |
+| `invalid_path` | 400 | Key contains `..`, null bytes, or is otherwise invalid. |

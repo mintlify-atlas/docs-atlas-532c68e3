@@ -1,0 +1,116 @@
+---
+title: "Cloudflare R2 Remote MCP Worker: R2 Storage via MCP"
+sidebarTitle: "Introduction"
+description: "A Cloudflare Worker that exposes R2 object operations as a remote MCP server, secured with GitHub OAuth and configurable tool surfaces."
+---
+
+Cloudflare R2 Remote MCP Worker is a Cloudflare Worker that wraps your R2 bucket as a fully remote [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server. MCP clients — such as ChatGPT custom connectors or MCP Inspector — authenticate through GitHub OAuth, then interact with your R2 bucket using structured tool calls. Object operations (list, get, put, delete, copy, move, rename) are enabled by default. Optional read-only account visibility tools and presigned URL tools can be unlocked through environment variables, each backed by its own credential surface.
+
+<Info>
+  This project exposes **object-level** access to one bound R2 bucket. Mutating account operations — such as bucket creation, CORS updates, lifecycle configuration, and domain changes — are intentionally not exposed as MCP tools.
+</Info>
+
+## How It Works
+
+Every request follows this path:
+
+```text
+MCP client (e.g. ChatGPT / MCP Inspector)
+  └─► GitHub OAuth  (/authorize → /callback → /token)
+        └─► Cloudflare Worker  (/mcp)
+              └─► R2 bucket  (bound via R2_BUCKET binding)
+```
+
+When `AUTH_MODE=github` (the production default), the OAuth provider intercepts calls to `/mcp` and enforces GitHub login before forwarding authenticated requests to the MCP handler. When `AUTH_MODE=none` (local development only), requests reach the MCP handler directly with no authentication gate.
+
+## Credential Surfaces
+
+The Worker exposes three independent credential surfaces. Each controls a distinct group of tools.
+
+| Surface | Tools | Credentials required |
+|---|---|---|
+| **Worker R2 binding** | Object list, head, get, put, delete, copy, move, rename; base64 upload/download | R2 binding in `wrangler.jsonc` (always present) |
+| **Cloudflare API** | Read-only bucket and account visibility | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` (read-only token) |
+| **R2 S3-compatible API** | Presigned GET and PUT URLs | `R2_ACCESS_KEY_ID` + `R2_SECRET_ACCESS_KEY` |
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Remote MCP Server" icon="plug">
+    Exposes a standards-compliant MCP endpoint at `/mcp`, compatible with any MCP client that supports remote servers and OAuth.
+  </Card>
+  <Card title="GitHub OAuth Protection" icon="lock">
+    Restricts access to a configurable allowlist of GitHub logins via `ALLOWED_GITHUB_LOGINS`. OAuth state is stored in a KV namespace.
+  </Card>
+  <Card title="Object-Level R2 Tools" icon="database">
+    Full object lifecycle: list, head, get, put, delete, copy, move, and rename inside the bound bucket. Destructive operations require `confirm: true`.
+  </Card>
+  <Card title="Base64 Transfer Tools" icon="arrows-up-down">
+    Upload and download binary or text objects encoded as base64, up to the configurable `MAX_TRANSFER_BYTES` limit (default 1 MB).
+  </Card>
+  <Card title="Optional Account Tools" icon="chart-bar">
+    Read-only bucket and account metadata tools, enabled with `ENABLE_ACCOUNT_TOOLS=true`. Requires a Cloudflare API token.
+  </Card>
+  <Card title="Optional Presigned URLs" icon="link">
+    Generate time-limited presigned GET and PUT URLs for direct client access, enabled with `ENABLE_PRESIGN_TOOLS=true`. Uses R2 S3 credentials.
+  </Card>
+  <Card title="Prefix Isolation" icon="folder">
+    Set `R2_ROOT_PREFIX` to restrict all object operations to a single key prefix, preventing access to the rest of the bucket.
+  </Card>
+  <Card title="Health Endpoint" icon="heart-pulse">
+    `/healthz` verifies bucket accessibility and returns current runtime configuration including enabled tool surfaces and auth mode.
+  </Card>
+</CardGroup>
+
+## Tool Surfaces
+
+### Default-enabled tools
+
+The following tools are registered on every deployment without any additional configuration:
+
+- **Object tools** — `r2_object_list`, `r2_object_head`, `r2_object_get`, `r2_object_put`, `r2_object_delete`, `r2_object_copy`, `r2_object_move`, `r2_object_rename`
+- **Base64 tools** — `r2_object_upload_base64`, `r2_object_download_base64`
+
+### Optional tools
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ENABLE_ACCOUNT_TOOLS=true` | `false` | Registers read-only Cloudflare account and bucket metadata tools. Requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. |
+| `ENABLE_PRESIGN_TOOLS=true` | `false` | Registers presigned URL generation tools. Requires `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`. |
+
+<Note>
+  Account tools are strictly read-only. No tool exposed by this Worker performs mutating account operations such as creating buckets, modifying CORS, or changing lifecycle rules.
+</Note>
+
+## Security Defaults
+
+- `AUTH_MODE` defaults to `"github"` when the variable is absent or empty.
+- Account and presigned URL tools are **disabled by default** and must be explicitly opted into.
+- Destructive object operations (`r2_object_delete`, batch operations) require a `confirm: true` argument.
+- Batch delete, move, and rename operations support `dryRun: true` for safe previewing.
+- `R2_ROOT_PREFIX` can isolate all object operations to a single prefix.
+
+## Prerequisites
+
+Before deploying, make sure you have the following ready:
+
+<CardGroup cols={2}>
+  <Card title="Node.js 20+" icon="node-js">
+    The project uses ES modules and requires Node.js 20 or newer. Check with `node --version`.
+  </Card>
+  <Card title="Wrangler 4" icon="wrench">
+    The Cloudflare Workers CLI. Installed as a dev dependency; use `npx wrangler` or `npm run deploy`.
+  </Card>
+  <Card title="Cloudflare Account" icon="cloud">
+    A Cloudflare account with Workers and R2 enabled. R2 has a free tier with a generous monthly allowance.
+  </Card>
+  <Card title="R2 Bucket" icon="bucket">
+    At least one R2 bucket for production and one for Wrangler preview environments (used in local `wrangler dev`).
+  </Card>
+  <Card title="GitHub OAuth App" icon="github">
+    Required for public deployments (`AUTH_MODE=github`). Provides the client ID, client secret, and callback URL.
+  </Card>
+  <Card title="MCP Client" icon="robot">
+    Any MCP-compatible client: ChatGPT custom MCP connector, MCP Inspector, or a custom integration using the MCP SDK.
+  </Card>
+</CardGroup>

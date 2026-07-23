@@ -1,0 +1,160 @@
+---
+title: "Run the R2 Remote MCP Worker Locally with Wrangler Dev"
+sidebarTitle: "Local Development"
+description: "Set up a local development environment for the R2 MCP Worker using AUTH_MODE=none, a .dev.vars file, and wrangler dev — no OAuth required."
+---
+
+Local development runs the Worker with `AUTH_MODE=none`, which disables GitHub OAuth entirely and lets any client connect to the `/mcp` endpoint without authentication. Configuration is loaded from a `.dev.vars` file instead of Wrangler secrets. Wrangler Dev proxies requests to a real R2 bucket, so you need at least one existing bucket (the preview bucket created during deployment setup works well here).
+
+<Warning>
+  Never expose `AUTH_MODE=none` on a public URL without an external protection layer such as Cloudflare Access or a firewall rule. Any client that can reach the Worker URL can access all R2 operations.
+</Warning>
+
+## Setup
+
+<Steps>
+  <Step title="Copy the example vars file">
+    ```bash
+    cp .dev.vars.example .dev.vars
+    ```
+
+    `.dev.vars` is listed in `.gitignore`. Do not commit it — it will contain real bucket names and, if you enable optional tools, API credentials.
+  </Step>
+
+  <Step title="Set R2_BUCKET_NAME">
+    Open `.dev.vars` and set `R2_BUCKET_NAME` to an existing bucket. The preview bucket created during deployment setup is a good choice for local development.
+
+    ```text
+    R2_BUCKET_NAME=your-preview-bucket-name
+    ```
+  </Step>
+
+  <Step title="(Optional) Configure optional tool variables">
+    If you want to test account tools or presign tools locally, uncomment and fill in the relevant variables in `.dev.vars`.
+
+    **Account tools** (`ENABLE_ACCOUNT_TOOLS=true`):
+
+    ```text
+    ENABLE_ACCOUNT_TOOLS=true
+    CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+    CLOUDFLARE_API_TOKEN=your-read-only-api-token
+    ```
+
+    **Presign tools** (`ENABLE_PRESIGN_TOOLS=true`):
+
+    ```text
+    ENABLE_PRESIGN_TOOLS=true
+    R2_ACCESS_KEY_ID=your-r2-access-key-id
+    R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+    R2_S3_REGION=auto
+    # R2_S3_ENDPOINT=https://your-account-id.r2.cloudflarestorage.com
+    ```
+  </Step>
+
+  <Step title="Start the dev server">
+    ```bash
+    npm run dev
+    ```
+
+    Wrangler compiles the Worker and starts a local server. The output includes the bound R2 bucket name and the local port.
+  </Step>
+</Steps>
+
+## Local endpoints
+
+With the dev server running, the Worker is available at:
+
+```text
+http://localhost:8787/healthz
+http://localhost:8787/mcp
+```
+
+The `/healthz` endpoint verifies the R2 bucket binding is reachable. The `/mcp` endpoint accepts MCP protocol requests without any authentication token when `AUTH_MODE=none`.
+
+## Full .dev.vars.example
+
+This is the complete contents of `.dev.vars.example`. Copy it to `.dev.vars` and replace placeholder values before running `npm run dev`.
+
+```text
+# Copy to .dev.vars for local development. Do not commit real values.
+
+# Local development only. Use AUTH_MODE=github for public deployments.
+AUTH_MODE=none
+
+R2_ROOT_PREFIX=
+MAX_INLINE_TEXT_BYTES=262144
+MAX_TRANSFER_BYTES=1048576
+MAX_LIST_LIMIT=100
+
+# Optional. Required by read-only account tools and presign tools.
+R2_BUCKET_NAME=example-bucket
+
+# Optional read-only Cloudflare account API tools.
+ENABLE_ACCOUNT_TOOLS=false
+CLOUDFLARE_ACCOUNT_ID=00000000000000000000000000000000
+CLOUDFLARE_API_TOKEN=replace-with-read-only-token
+
+# GitHub OAuth App authentication. Required when AUTH_MODE=github.
+ALLOWED_GITHUB_LOGINS=your-github-login
+GITHUB_CLIENT_ID=replace-with-github-oauth-client-id
+GITHUB_CLIENT_SECRET=replace-with-github-oauth-client-secret
+COOKIE_ENCRYPTION_KEY=replace-with-at-least-32-random-bytes
+
+# Optional presigned URL tools.
+ENABLE_PRESIGN_TOOLS=false
+R2_ACCESS_KEY_ID=replace-with-r2-access-key-id
+R2_SECRET_ACCESS_KEY=replace-with-r2-secret-access-key
+R2_S3_REGION=auto
+# R2_S3_ENDPOINT=https://00000000000000000000000000000000.r2.cloudflarestorage.com
+```
+
+<Note>
+  `AUTH_MODE` is set to `"none"` in `.dev.vars.example` by default. If you want to test the full GitHub OAuth flow locally using a tunnelling tool such as Cloudflare Tunnel or ngrok, change `AUTH_MODE` to `"github"` and supply the remaining GitHub OAuth variables.
+</Note>
+
+## Verifying locally
+
+**Health check** — confirm the Worker starts and the bucket binding is accessible:
+
+```bash
+curl http://localhost:8787/healthz
+```
+
+Expected response:
+
+```json
+{
+  "ok": true,
+  "bucketAccessible": true
+}
+```
+
+**Type check** — verify TypeScript compiles without errors:
+
+```bash
+npm run type-check
+```
+
+**Smoke tests** — run the automated smoke test suite against the running dev server:
+
+```bash
+npm run smoke
+```
+
+## Using MCP Inspector locally
+
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector) provides a browser-based UI to browse and call MCP tools interactively. Because `AUTH_MODE=none` is active locally, no OAuth token is needed.
+
+Start the inspector:
+
+```bash
+npx @modelcontextprotocol/inspector@latest
+```
+
+Connect to the local MCP endpoint:
+
+```text
+http://localhost:8787/mcp
+```
+
+The inspector discovers all available tools automatically. You can call any R2 tool directly from the UI and inspect request and response payloads in real time.

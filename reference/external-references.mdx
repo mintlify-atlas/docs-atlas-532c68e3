@@ -1,0 +1,39 @@
+---
+title: "External References: Cloudflare and MCP Documentation"
+sidebarTitle: "External References"
+description: "Primary Cloudflare Workers, Cloudflare R2, Model Context Protocol, and GitHub OAuth references used as implementation guides for this project."
+---
+
+This project is built on Cloudflare Workers, Cloudflare R2, the Model Context Protocol, and GitHub OAuth. The following references are the primary documentation used during implementation. Each link points to the canonical upstream source for the relevant API or specification.
+
+## Cloudflare Workers and MCP
+
+- [Cloudflare Remote MCP Server Guide](https://developers.cloudflare.com/agents/guides/remote-mcp-server/) — end-to-end walkthrough of deploying a remote MCP server on Cloudflare Workers, including OAuth setup and tool registration
+- [Cloudflare MCP Handler API Reference](https://developers.cloudflare.com/agents/api-reference/mcp-handler-api/) — API reference for the `McpAgent` class and handler methods used in the Worker
+- [cloudflare/workers-mcp on GitHub](https://github.com/cloudflare/workers-mcp) — Cloudflare's open-source library that powers the MCP handler and transport on Workers
+- [cloudflare/mcp-server-cloudflare on GitHub](https://github.com/cloudflare/mcp-server-cloudflare) — Cloudflare's reference MCP server implementation, used as a structural reference
+
+## Cloudflare R2
+
+- [R2 Workers API Reference](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) — reference for the R2 binding interface available inside a Worker, covering `list`, `head`, `get`, `put`, `delete`, and `createMultipartUpload`
+- [R2 REST API Reference](https://developers.cloudflare.com/api/resources/r2/) — Cloudflare REST API reference for account-level R2 operations, used by the optional account/admin tools
+- [R2 Presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) — documentation for generating time-limited S3-compatible presigned GET and PUT URLs, used by the optional presigned URL tools
+
+## GitHub OAuth
+
+- [GitHub OAuth Apps Documentation](https://docs.github.com/en/apps/oauth-apps) — reference for registering a GitHub OAuth App, configuring the callback URL, and handling the authorization code flow used to protect the MCP endpoint
+
+## Model Context Protocol
+
+- [MCP specification and SDK](https://modelcontextprotocol.io/) — the Model Context Protocol specification, including tool definitions, transport contracts, and the official SDK
+- [@modelcontextprotocol/sdk on npm](https://www.npmjs.com/package/@modelcontextprotocol/sdk) — the npm package used to implement MCP tool handlers and manage the server-side MCP session
+
+## Attribution
+
+<Info>
+  This project was developed with AI assistance. The project, documentation,
+  and repository materials were shaped through human-directed work supported by
+  AI tools during drafting, structuring, review, and refinement. AI assistance
+  does not make the project automatically correct, complete, or suitable for
+  every use case. Read it, test it, and adapt it to your own context.
+</Info>

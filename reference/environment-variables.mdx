@@ -1,0 +1,205 @@
+---
+title: "Environment Variables Reference for R2 MCP Worker"
+sidebarTitle: "Environment Variables"
+description: "Full reference for every R2 MCP Worker env var: defaults, accepted values, when each is required, and which must be stored as encrypted Wrangler secrets."
+---
+
+All configuration for the R2 MCP Worker is driven by environment variables. Non-sensitive values are set under the `vars` block in `wrangler.jsonc` and are visible in plain text. Sensitive values — credentials, tokens, and signing keys — must be stored as encrypted Wrangler secrets. This page is the complete reference for every variable the Worker reads.
+
+---
+
+## Auth
+
+<ParamField query="AUTH_MODE" type="string" default="github">
+  Controls which authentication strategy the Worker enforces on the `/mcp` route.
+
+  Accepted values: `"github"` or `"none"`.
+
+  - `"github"` — requires GitHub OAuth login. Callers must complete the OAuth flow before the Worker will serve MCP requests. Requires `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `COOKIE_ENCRYPTION_KEY`, and `OAUTH_KV`.
+  - `"none"` — disables authentication entirely. Suitable for local development or internal deployments protected by another mechanism. **Do not use `"none"` for public deployments.**
+
+  If omitted or set to an empty string, the Worker defaults to `"github"`.
+</ParamField>
+
+<ParamField query="ALLOWED_GITHUB_LOGINS" type="string">
+  Comma-separated list of GitHub usernames that are permitted to access the `/mcp` route when `AUTH_MODE=github`. Comparison is case-insensitive.
+
+  Example: `"alice,bob,carol"`
+
+  Setting this to an empty string means no GitHub user will be granted access. You must include at least your own GitHub username for the Worker to be usable.
+</ParamField>
+
+---
+
+## R2 Binding and Object Scope
+
+<ParamField query="R2_BUCKET_NAME" type="string">
+  The name of the R2 bucket that the Worker operates on. This value must match the `bucket_name` set in the `r2_buckets` binding in `wrangler.jsonc`.
+
+  Required by the admin account tools (`ENABLE_ACCOUNT_TOOLS=true`) and the presigned URL tools (`ENABLE_PRESIGN_TOOLS=true`). The core object tools use the `R2_BUCKET` binding directly, but some operations cross-reference this name for API calls.
+</ParamField>
+
+<ParamField query="R2_ROOT_PREFIX" type="string">
+  An optional key prefix that scopes all object operations to a sub-path of the bucket. When set, every key provided by a tool caller is interpreted as relative to this prefix, and all keys returned in responses have the prefix stripped.
+
+  Example: setting `R2_ROOT_PREFIX=team/data` means a tool call for key `report.csv` operates on the object stored at `team/data/report.csv`.
+
+  Leave empty (or omit) to operate on the full bucket.
+</ParamField>
+
+---
+
+## Payload Limits
+
+<ParamField query="MAX_INLINE_TEXT_BYTES" type="integer" default="262144">
+  Maximum number of UTF-8 bytes that the `r2_object_get` tool will return inline in the MCP response. Objects larger than this limit are rejected with an error directing the caller to use a presigned URL or a streaming approach instead.
+
+  Default: `262144` (256 KB). Must be a positive integer.
+</ParamField>
+
+<ParamField query="MAX_TRANSFER_BYTES" type="integer" default="1048576">
+  Maximum number of bytes allowed for base64 transfer tools and Worker-mediated copy operations. This limit protects against Worker CPU and memory exhaustion when the Worker itself reads and re-encodes object data.
+
+  Default: `1048576` (1 MB). Must be a positive integer.
+</ParamField>
+
+<ParamField query="MAX_LIST_LIMIT" type="integer" default="100">
+  Maximum number of objects returned per `r2_object_list` call. Tool callers may request a smaller page size, but they cannot exceed this ceiling.
+
+  Default: `100`. Must be a positive integer.
+</ParamField>
+
+---
+
+## Feature Flags
+
+<ParamField query="ENABLE_ACCOUNT_TOOLS" type="string" default="false">
+  Set to `"true"` to activate the read-only Cloudflare account admin tools (e.g. bucket metadata, usage statistics). These tools make authenticated requests to the Cloudflare REST API using `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+
+  Both `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` must be set before enabling this flag.
+</ParamField>
+
+<ParamField query="ENABLE_PRESIGN_TOOLS" type="string" default="false">
+  Set to `"true"` to activate the presigned URL generation tools. These tools use the AWS S3-compatible R2 API to produce time-limited, pre-authenticated URLs that grant direct access to objects without routing traffic through the Worker.
+
+  `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` must be set before enabling this flag.
+</ParamField>
+
+---
+
+## Secrets — GitHub OAuth
+
+<Warning>
+  The variables in this section are sensitive credentials. They must **never** be placed in `wrangler.jsonc`. Always set them with `npx wrangler secret put <NAME>` so they are encrypted at rest and excluded from source control.
+</Warning>
+
+<ParamField query="GITHUB_CLIENT_ID" type="string">
+  The client ID of your GitHub OAuth App. Obtained from the GitHub Developer Settings page after creating an OAuth App.
+
+  Required when `AUTH_MODE=github`.
+</ParamField>
+
+<ParamField query="GITHUB_CLIENT_SECRET" type="string">
+  The client secret of your GitHub OAuth App. Generated alongside the client ID in GitHub Developer Settings.
+
+  Required when `AUTH_MODE=github`.
+</ParamField>
+
+<ParamField query="COOKIE_ENCRYPTION_KEY" type="string">
+  A high-entropy random string used as the key for HMAC-signing the OAuth session cookie. This prevents cookie tampering between the browser and the Worker.
+
+  Required when `AUTH_MODE=github`.
+
+  <Tip>
+    Generate a secure value with:
+    ```bash
+    openssl rand -base64 32
+    ```
+    The output is a 44-character base64 string with ~256 bits of entropy — sufficient for cookie signing.
+  </Tip>
+</ParamField>
+
+---
+
+## Secrets — Cloudflare API
+
+<ParamField query="CLOUDFLARE_ACCOUNT_ID" type="string">
+  Your Cloudflare account ID. Found in the Cloudflare dashboard URL or under **Account Home → Overview**.
+
+  Required when `ENABLE_ACCOUNT_TOOLS=true`. Also used to derive the R2 S3-compatible endpoint when `R2_S3_ENDPOINT` is not explicitly set:
+  `https://<account-id>.r2.cloudflarestorage.com`
+</ParamField>
+
+<ParamField query="CLOUDFLARE_API_TOKEN" type="string">
+  A Cloudflare API token with read-only R2 scope. Create one at **My Profile → API Tokens → Create Token** using the **R2:Read** permission template.
+
+  Required when `ENABLE_ACCOUNT_TOOLS=true`.
+</ParamField>
+
+---
+
+## Secrets — R2 S3 / Presign
+
+<ParamField query="R2_ACCESS_KEY_ID" type="string">
+  R2 access key ID for the S3-compatible API. Generated in the Cloudflare dashboard under **R2 → Manage R2 API Tokens**.
+
+  Required when `ENABLE_PRESIGN_TOOLS=true`.
+</ParamField>
+
+<ParamField query="R2_SECRET_ACCESS_KEY" type="string">
+  R2 secret access key corresponding to `R2_ACCESS_KEY_ID`. Shown only once at creation time — store it immediately.
+
+  Required when `ENABLE_PRESIGN_TOOLS=true`.
+</ParamField>
+
+<ParamField query="R2_S3_ENDPOINT" type="string">
+  The S3-compatible endpoint URL for your R2 bucket. If omitted, the Worker derives it automatically from `CLOUDFLARE_ACCOUNT_ID`:
+
+  ```text
+  https://<account-id>.r2.cloudflarestorage.com
+  ```
+
+  Set this explicitly if you need to override the derived value or use a custom domain endpoint.
+</ParamField>
+
+<ParamField query="R2_S3_REGION" type="string" default="auto">
+  The region string passed to the S3 client. R2 uses `"auto"` as its canonical region identifier.
+
+  Only change this if your S3-client tooling requires a different value for compatibility reasons.
+</ParamField>
+
+---
+
+## KV Namespace Binding
+
+<ParamField query="OAUTH_KV" type="KVNamespace">
+  A Cloudflare KV namespace binding used to store short-lived OAuth state tokens during the GitHub OAuth callback flow. The binding name must be `OAUTH_KV` and the namespace ID must be set in the `kv_namespaces` array in `wrangler.jsonc`.
+
+  Required when `AUTH_MODE=github`. The Worker will throw a startup error if this binding is missing and GitHub auth is active.
+</ParamField>
+
+---
+
+## Summary Table
+
+| Variable | Type | Required | Default |
+|---|---|---|---|
+| `AUTH_MODE` | `string` | Optional | `"github"` |
+| `ALLOWED_GITHUB_LOGINS` | `string` | When `AUTH_MODE=github` | — |
+| `R2_BUCKET_NAME` | `string` | For admin + presign tools | — |
+| `R2_ROOT_PREFIX` | `string` | Optional | `""` |
+| `MAX_INLINE_TEXT_BYTES` | `integer` | Optional | `262144` |
+| `MAX_TRANSFER_BYTES` | `integer` | Optional | `1048576` |
+| `MAX_LIST_LIMIT` | `integer` | Optional | `100` |
+| `ENABLE_ACCOUNT_TOOLS` | `string` | Optional | `"false"` |
+| `ENABLE_PRESIGN_TOOLS` | `string` | Optional | `"false"` |
+| `GITHUB_CLIENT_ID` | `string` (secret) | When `AUTH_MODE=github` | — |
+| `GITHUB_CLIENT_SECRET` | `string` (secret) | When `AUTH_MODE=github` | — |
+| `COOKIE_ENCRYPTION_KEY` | `string` (secret) | When `AUTH_MODE=github` | — |
+| `CLOUDFLARE_ACCOUNT_ID` | `string` | When account tools enabled | — |
+| `CLOUDFLARE_API_TOKEN` | `string` (secret) | When account tools enabled | — |
+| `R2_ACCESS_KEY_ID` | `string` (secret) | When presign tools enabled | — |
+| `R2_SECRET_ACCESS_KEY` | `string` (secret) | When presign tools enabled | — |
+| `R2_S3_ENDPOINT` | `string` | Optional | Derived from account ID |
+| `R2_S3_REGION` | `string` | Optional | `"auto"` |
+| `OAUTH_KV` | `KVNamespace` binding | When `AUTH_MODE=github` | — |

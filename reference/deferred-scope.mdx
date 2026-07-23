@@ -1,0 +1,73 @@
+---
+title: "Deferred Scope: Features Not in the Current Release"
+sidebarTitle: "Deferred Scope"
+description: "Documents R2 and MCP capabilities intentionally excluded from the current release, explaining what is not available and why each area was deferred."
+---
+
+Several R2 and MCP capabilities are intentionally not implemented in the current release. This page documents what is excluded and why, so integrators know exactly what is and isn't available when building against this Worker.
+
+<Note>
+  The current tool set is intentionally conservative. The goal is a minimal,
+  auditable surface rather than full R2 account administration through an AI
+  interface. Contributions or forks that extend this surface should carefully
+  consider the security implications of each new operation before exposing it
+  as an MCP tool.
+</Note>
+
+## Destructive Account Administration
+
+These operations are excluded because they change account or bucket configuration in ways that are difficult or impossible to reverse. The current admin surface is strictly read-only: account and bucket tools can inspect state but cannot mutate it.
+
+<AccordionGroup>
+  <Accordion title="Bucket Lifecycle">
+    - **bucket create** — creates a new R2 bucket in the account
+    - **bucket delete** — permanently removes a bucket and all its objects
+  </Accordion>
+  <Accordion title="CORS Configuration">
+    - **CORS put** — overwrites the bucket's CORS policy
+    - **CORS delete** — removes all CORS rules from the bucket
+  </Accordion>
+  <Accordion title="Lifecycle Rules">
+    - **lifecycle put** — creates or replaces object lifecycle rules
+    - **lifecycle delete** — removes all lifecycle rules from the bucket
+  </Accordion>
+  <Accordion title="Custom Domains">
+    - **custom domain attach** — binds a custom hostname to the bucket
+    - **custom domain update** — modifies an existing custom domain binding
+    - **custom domain delete** — removes a custom domain from the bucket
+    - **managed domain update** — changes the managed `*.r2.dev` domain configuration
+  </Accordion>
+  <Accordion title="Event Notifications">
+    - **event notification put** — creates or updates a bucket event notification rule
+    - **event notification delete** — removes an event notification rule
+  </Accordion>
+  <Accordion title="Bucket Lock">
+    - **bucket lock put** — sets an object-lock retention policy on the bucket
+  </Accordion>
+  <Accordion title="Sippy">
+    - **Sippy put** — configures Sippy incremental migration on the bucket
+    - **Sippy delete** — removes the Sippy configuration from the bucket
+  </Accordion>
+</AccordionGroup>
+
+## Large Object Operations
+
+Inline MCP payloads are not appropriate for large object movement. Sending multi-megabyte or gigabyte-scale data through a conversational MCP channel creates reliability, timeout, and memory pressure issues. Presigned URLs are the recommended path for large object transfers — they allow clients to upload or download directly to R2 without routing data through the Worker.
+
+The following operations are excluded for this reason:
+
+- **Multipart upload tools** — initiating, uploading parts, and completing multipart uploads via MCP
+- **Multipart copy** — copying large objects using the S3 multipart copy protocol
+- **Unbounded object copy** — copying objects with no size guardrails inside MCP tool calls
+- **Streaming object transfer through MCP** — piping large object bodies through the MCP response stream
+
+## Advanced R2 Features
+
+The following features may be added in a future release, but each requires explicit tool contracts, thorough documentation, and a dedicated security review before being exposed as MCP tools:
+
+- **Bucket locks mutation** — programmatic changes to object-lock retention policies
+- **Sippy configuration mutation** — enabling or reconfiguring incremental migration from another provider
+- **Temporary access credentials** — generating short-lived R2 credentials through the MCP surface
+- **Super Slurper** — bulk migration jobs from external object storage
+- **Data Catalog** — R2 Data Catalog integration and table management
+- **Object range reads** — fetching byte ranges of objects inline through MCP tool responses

@@ -1,0 +1,145 @@
+---
+title: "Set Up GitHub OAuth for R2 MCP Worker Access"
+sidebarTitle: "GitHub OAuth"
+description: "Step-by-step guide to creating a GitHub OAuth App, configuring Worker secrets, setting the allowlist, and provisioning the KV namespace."
+---
+
+This page walks through creating a GitHub OAuth App, wiring its credentials into the Worker as secrets, configuring the allowlist, and provisioning the KV namespace that the OAuth flow depends on. Complete all sections before deploying with `AUTH_MODE=github`.
+
+## Create a GitHub OAuth App
+
+<Steps>
+  <Step title="Open OAuth Apps settings">
+    Navigate to **GitHub → Settings → Developer settings → OAuth Apps** and click **New OAuth App**.
+  </Step>
+  <Step title="Set the application name">
+    Enter any name for the application. This name appears in the GitHub authorization screen and in the Worker's approval dialog.
+  </Step>
+  <Step title="Set the homepage URL">
+    Enter your Worker URL or any public URL. This field is informational only.
+  </Step>
+  <Step title="Set the authorization callback URL">
+    Enter the callback URL that matches your Worker's deployed address:
+
+    ```text
+    https://<worker-url>/callback
+    ```
+
+    If you are using a Cloudflare Workers subdomain and already know it, set this now. If you are deploying for the first time and the subdomain is assigned automatically, deploy once without GitHub secrets, note the assigned URL, then return here and update the callback before re-deploying with secrets set.
+  </Step>
+  <Step title="Register the app and copy the Client ID">
+    Click **Register application**. The Client ID is shown on the app's settings page. Copy it.
+  </Step>
+  <Step title="Generate a client secret">
+    Click **Generate a new client secret**. Copy the secret immediately — GitHub will not show it again after you navigate away.
+  </Step>
+</Steps>
+
+<Note>
+  The callback URL must match exactly, including the scheme and path. A mismatch between the registered URL and the Worker URL is the most common cause of `redirect_uri_mismatch` errors at the GitHub step.
+</Note>
+
+## Configure Secrets
+
+Store the GitHub credentials and the cookie encryption key as Wrangler secrets. Secrets are encrypted at rest in Cloudflare and are never written to `wrangler.jsonc`.
+
+```bash
+npx wrangler secret put GITHUB_CLIENT_ID -c wrangler.jsonc
+npx wrangler secret put GITHUB_CLIENT_SECRET -c wrangler.jsonc
+npx wrangler secret put COOKIE_ENCRYPTION_KEY -c wrangler.jsonc
+```
+
+Each command prompts for the value. Paste and press enter.
+
+`COOKIE_ENCRYPTION_KEY` is used to sign the `__Host-APPROVED_CLIENTS` cookie, which tracks which MCP clients the user has already approved. It must be a random, high-entropy string. Generate one with:
+
+```bash
+openssl rand -base64 32
+```
+
+<Note>
+  `COOKIE_ENCRYPTION_KEY` does not encrypt data at rest in R2. It is used only to HMAC-sign a browser cookie. It must still be treated as a secret and must never be committed to source control.
+</Note>
+
+## Configure the Allowlist
+
+Add `AUTH_MODE` and `ALLOWED_GITHUB_LOGINS` to the `vars` block of `wrangler.jsonc`:
+
+```jsonc
+"vars": {
+  "AUTH_MODE": "github",
+  "ALLOWED_GITHUB_LOGINS": "your-github-login"
+}
+```
+
+To allow multiple users, use a comma-separated value:
+
+```jsonc
+"vars": {
+  "AUTH_MODE": "github",
+  "ALLOWED_GITHUB_LOGINS": "alice,bob,charlie"
+}
+```
+
+Matching is case-insensitive — `Alice`, `alice`, and `ALICE` all match the same entry. If `ALLOWED_GITHUB_LOGINS` is empty or absent, **no login is accepted** regardless of whether GitHub authentication succeeds.
+
+## KV Namespace for OAuth State
+
+The OAuth flow stores short-lived state tokens in Cloudflare KV so the `/callback` handler can validate that the incoming request matches an authorized session. The KV binding is required whenever `AUTH_MODE=github`.
+
+Create the namespace:
+
+```bash
+npx wrangler kv namespace create OAUTH_KV
+```
+
+Wrangler prints the generated namespace ID. Add it to `wrangler.jsonc`:
+
+```jsonc
+"kv_namespaces": [
+  {
+    "binding": "OAUTH_KV",
+    "id": "your-kv-namespace-id"
+  }
+]
+```
+
+State entries expire after 600 seconds (10 minutes). If the user does not complete the GitHub login within that window, the callback will reject the state as invalid and they must restart the flow.
+
+## Approval Dialog
+
+The first time an MCP client connects, the Worker renders an HTML approval dialog before redirecting to GitHub. The dialog shows:
+
+- The server name (`Cloudflare R2 Remote MCP Worker`) and its description
+- The connecting MCP client's name and, if registered, its client URI
+- **Approve** and **Cancel** buttons
+
+The form is CSRF-protected using a `__Host-CSRF_TOKEN` cookie that is verified server-side before the redirect to GitHub proceeds. Once a client is approved, that approval is stored in a signed `__Host-APPROVED_CLIENTS` cookie so the dialog is not shown again for the same client on the same browser.
+
+## Failure Modes
+
+<AccordionGroup>
+  <Accordion title="OAuth fails before GitHub redirect">
+    The Worker returns an error before ever reaching GitHub if any of the following are true:
+
+    - `AUTH_MODE` is not `"github"` — the OAuth provider is not activated
+    - `OAUTH_KV` binding is missing from `wrangler.jsonc` — the Worker cannot store state
+    - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, or `COOKIE_ENCRYPTION_KEY` secrets are missing — `requireGithubOAuthEnv` throws a `server_error` before the redirect is constructed
+
+    Fix: verify all three secrets are set with `npx wrangler secret list -c wrangler.jsonc` and confirm the `kv_namespaces` binding is present.
+  </Accordion>
+  <Accordion title="Login succeeds but access is denied">
+    GitHub authentication completes and the user's login is returned, but the Worker responds with `403 GitHub login is not allowed to access this MCP server`.
+
+    Cause: the authenticated GitHub username is not present in `ALLOWED_GITHUB_LOGINS`.
+
+    Fix: add the username (case-insensitive) to `ALLOWED_GITHUB_LOGINS` in `wrangler.jsonc` and redeploy.
+  </Accordion>
+  <Accordion title="Callback fails with redirect_uri_mismatch">
+    GitHub returns an error at the callback step because the `redirect_uri` sent in the authorization request does not match the URL registered in the GitHub OAuth App settings.
+
+    Cause: the Worker URL changed after the OAuth App was created, or the callback URL was entered incorrectly during setup.
+
+    Fix: update the **Authorization callback URL** in the GitHub OAuth App settings to match `https://<current-worker-url>/callback` exactly.
+  </Accordion>
+</AccordionGroup>

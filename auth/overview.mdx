@@ -1,0 +1,80 @@
+---
+title: "Authentication Overview: GitHub OAuth for MCP Access"
+sidebarTitle: "Overview"
+description: "Learn how GitHub OAuth gates access to the /mcp endpoint, how auth modes work, and how R2 bucket access is kept separate from identity."
+---
+
+The `/mcp` endpoint is protected by GitHub OAuth when `AUTH_MODE=github`. When a client connects, the Worker redirects it through a standard OAuth flow that requires the user to log in to GitHub. That login is used purely as an identity signal — the Worker reads the GitHub username and checks it against a configured allowlist. It does **not** request repository access and does not act on behalf of the user on GitHub in any way.
+
+R2 access is always governed by the Worker's own configuration: the `R2_BUCKET` binding, an optional Cloudflare API token for account-level read tools, and optional R2 S3 credentials for presigned URL generation. No GitHub permission controls R2.
+
+## Auth Modes
+
+| Mode | Use case |
+|------|----------|
+| `AUTH_MODE=github` | Public deployments — requires GitHub login present in `ALLOWED_GITHUB_LOGINS` |
+| `AUTH_MODE=none` | Local development or environments protected by an external access layer only |
+
+<Note>
+  If `AUTH_MODE` is omitted from `wrangler.jsonc`, the Worker defaults to `"github"`.
+</Note>
+
+<Warning>
+  Do not deploy `AUTH_MODE=none` on a public URL unless a separate layer — such as Cloudflare Access or a private network — protects the endpoint. With `AUTH_MODE=none`, any HTTP client that can reach the Worker URL can call all enabled MCP tools.
+</Warning>
+
+## The OAuth Flow
+
+When a client connects to `/mcp`, the Worker initiates the following sequence:
+
+```text
+MCP client
+→ Worker /authorize
+→ GitHub login
+→ Worker /callback
+→ allowlist check
+→ MCP client receives OAuth token
+→ MCP client calls /mcp
+```
+
+The Worker exposes these routes to support the flow:
+
+| Route | Purpose |
+|-------|---------|
+| `/authorize` | Starts OAuth authorization |
+| `/callback` | Receives the GitHub OAuth callback |
+| `/token` | OAuth token endpoint for MCP clients |
+| `/register` | Dynamic client registration |
+| `/mcp` | Protected MCP endpoint |
+
+MCP clients should be configured with the `/mcp` URL. The client handles the redirect to `/authorize` automatically when an unauthenticated request receives an OAuth challenge.
+
+## Allowlist
+
+Access is controlled by the `ALLOWED_GITHUB_LOGINS` variable in `wrangler.jsonc`. Its value is a comma-separated list of GitHub usernames:
+
+```text
+alice,bob,charlie
+```
+
+Comparison is case-insensitive. The Worker lowercases all entries and the incoming login before comparing. If `ALLOWED_GITHUB_LOGINS` is empty or not set, no GitHub login is accepted — the Worker will return `403` for every callback regardless of which account is used.
+
+## R2 Access Boundary
+
+GitHub OAuth controls only who can reach `/mcp`. What those users can do inside the MCP session is controlled entirely by the Worker's own configuration:
+
+- **`R2_BUCKET` binding** — the Cloudflare R2 bucket exposed through object tools
+- **`CLOUDFLARE_API_TOKEN`** (optional) — enables read-only account administration tools
+- **`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`** (optional) — enables presigned URL generation via the S3-compatible API
+- **`R2_ROOT_PREFIX`** (optional) — restricts all object tool operations to a path subtree
+
+Authenticating through GitHub OAuth does not create, modify, or read any GitHub resource. The access token retrieved during the flow is stored only to fetch the authenticated username and is not used further.
+
+<Note>
+  Configure a **GitHub OAuth App**, not a GitHub App and not a personal access token. GitHub Apps use installation IDs and private keys and are not compatible with this flow. Personal access tokens are not an appropriate mechanism for end-user authentication.
+</Note>
+
+---
+
+For setup instructions, see [GitHub OAuth Setup](/auth/github-oauth).
+For the full threat model and deployment security checklist, see [Security](/auth/security).

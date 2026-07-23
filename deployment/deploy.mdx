@@ -1,0 +1,215 @@
+---
+title: "Deploy the R2 Remote MCP Worker to Cloudflare Workers"
+sidebarTitle: "Deploy"
+description: "Deploy the R2 MCP Worker to production: create buckets, configure KV, set up GitHub OAuth, push secrets, and verify your live MCP endpoint."
+---
+
+The R2 MCP Worker deploys as a Cloudflare Worker that exposes six HTTP routes: `/healthz`, `/mcp`, `/authorize`, `/callback`, `/token`, and `/register`. The `/mcp` route is the Model Context Protocol endpoint; when `AUTH_MODE=github`, the OAuth routes gate all access to it. A successful deployment requires one R2 bucket binding, one KV namespace for OAuth state storage, and GitHub OAuth secrets for any public-facing instance.
+
+<Steps>
+  <Step title="Install dependencies and log in to Wrangler">
+    Install Node dependencies and authenticate the Wrangler CLI with your Cloudflare account.
+
+    ```bash
+    npm install
+    npx wrangler login
+    ```
+  </Step>
+
+  <Step title="Create R2 buckets">
+    Create a production bucket and a separate preview bucket. The preview bucket is used by local and preview Worker runs; the production bucket is used by deployed Workers.
+
+    ```bash
+    npx wrangler r2 bucket create your-bucket-name
+    npx wrangler r2 bucket create your-preview-bucket-name
+    ```
+
+    Alternatively, create buckets from the Cloudflare dashboard under **R2 Object Storage → Create bucket**.
+  </Step>
+
+  <Step title="Configure the Worker">
+    Copy the example configuration file and edit it for your deployment.
+
+    ```bash
+    cp wrangler.example.jsonc wrangler.jsonc
+    ```
+
+    Open `wrangler.jsonc` and update the following fields:
+
+    - `name` — unique Worker name; determines the `*.workers.dev` subdomain
+    - `r2_buckets[0].bucket_name` — your production bucket name
+    - `r2_buckets[0].preview_bucket_name` — your preview bucket name
+    - `vars.R2_BUCKET_NAME` — must match `r2_buckets[0].bucket_name`
+    - `vars.R2_ROOT_PREFIX` — optional prefix to scope all R2 operations
+    - `vars.AUTH_MODE` — `"github"` for public deployments, `"none"` for local-only
+    - `vars.ALLOWED_GITHUB_LOGINS` — comma-separated list of GitHub usernames allowed to authenticate
+    - Feature flags — `ENABLE_ACCOUNT_TOOLS`, `ENABLE_PRESIGN_TOOLS`
+
+    <Warning>
+      `wrangler.jsonc` is listed in `.gitignore`. Never commit it — it will contain real bucket names and, after you set secrets, references to sensitive configuration.
+    </Warning>
+  </Step>
+
+  <Step title="Bind the R2 bucket">
+    Ensure the `r2_buckets` block in `wrangler.jsonc` matches the buckets you created. All object tools in the Worker operate exclusively through this binding.
+
+    ```jsonc
+    "r2_buckets": [
+      {
+        "binding": "R2_BUCKET",
+        "bucket_name": "your-bucket-name",
+        "preview_bucket_name": "your-preview-bucket-name"
+      }
+    ]
+    ```
+  </Step>
+
+  <Step title="Configure the OAuth state KV namespace">
+    The OAuth flow requires a KV namespace to store short-lived state tokens during callback validation. Create the namespace and copy the ID Wrangler prints.
+
+    ```bash
+    npx wrangler kv namespace create OAUTH_KV
+    ```
+
+    Add the returned namespace ID to `wrangler.jsonc`:
+
+    ```jsonc
+    "kv_namespaces": [
+      {
+        "binding": "OAUTH_KV",
+        "id": "your-kv-namespace-id"
+      }
+    ]
+    ```
+  </Step>
+
+  <Step title="Configure a GitHub OAuth App">
+    Public deployments must use `AUTH_MODE=github`. Create a GitHub OAuth App and set its **Authorization callback URL** to the Worker's `/callback` route.
+
+    **Known subdomain path** — if you already know your Cloudflare Workers subdomain:
+
+    1. Set `name` in `wrangler.jsonc`.
+    2. The Worker URL will be `https://<worker-name>.<account-subdomain>.workers.dev`.
+    3. Set the GitHub OAuth callback to:
+       ```text
+       https://<worker-name>.<account-subdomain>.workers.dev/callback
+       ```
+
+    **Unknown subdomain path** — if you do not yet know your subdomain:
+
+    1. Set `name` in `wrangler.jsonc` and deploy once with only non-secret configuration.
+    2. Copy the Worker URL printed by Wrangler or shown in the Cloudflare dashboard.
+    3. Create or update the GitHub OAuth App callback URL:
+       ```text
+       https://<actual-worker-url-host>/callback
+       ```
+    4. Proceed to set OAuth secrets below, then deploy again.
+  </Step>
+
+  <Step title="Set required secrets">
+    Push the GitHub OAuth credentials and a cookie encryption key to the Worker's secret store. These are required whenever `AUTH_MODE=github`.
+
+    ```bash
+    npx wrangler secret put GITHUB_CLIENT_ID -c wrangler.jsonc
+    npx wrangler secret put GITHUB_CLIENT_SECRET -c wrangler.jsonc
+    npx wrangler secret put COOKIE_ENCRYPTION_KEY -c wrangler.jsonc
+    ```
+
+    Generate a strong value for `COOKIE_ENCRYPTION_KEY` with:
+
+    ```bash
+    openssl rand -base64 32
+    ```
+  </Step>
+
+  <Step title="(Optional) Enable account tools">
+    Read-only Cloudflare account API tools surface R2 bucket metadata. Enable them by setting the following in `wrangler.jsonc` under `vars`:
+
+    ```jsonc
+    "ENABLE_ACCOUNT_TOOLS": "true",
+    "CLOUDFLARE_ACCOUNT_ID": "your-cloudflare-account-id"
+    ```
+
+    Then set the API token secret:
+
+    ```bash
+    npx wrangler secret put CLOUDFLARE_API_TOKEN -c wrangler.jsonc
+    ```
+
+    Use the narrowest token scope that can read the R2 resources required by this deployment.
+  </Step>
+
+  <Step title="(Optional) Enable presign tools">
+    Presigned URL tools allow the Worker to generate time-limited S3-compatible URLs for direct object access. Enable them by setting the following in `wrangler.jsonc` under `vars`:
+
+    ```jsonc
+    "ENABLE_PRESIGN_TOOLS": "true",
+    "R2_S3_REGION": "auto"
+    ```
+
+    Then set the R2 S3-compatible API credentials:
+
+    ```bash
+    npx wrangler secret put R2_ACCESS_KEY_ID -c wrangler.jsonc
+    npx wrangler secret put R2_SECRET_ACCESS_KEY -c wrangler.jsonc
+    ```
+
+    <Note>
+      If `R2_S3_ENDPOINT` is not set, the Worker derives it automatically from `CLOUDFLARE_ACCOUNT_ID`:
+
+      ```text
+      https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
+      ```
+
+      You can set `R2_S3_ENDPOINT` explicitly in `vars` if you need to override this.
+    </Note>
+  </Step>
+
+  <Step title="Verify locally before deploying">
+    Start the local dev server to confirm the Worker starts, the R2 bucket binding resolves, and the health endpoint responds correctly.
+
+    ```bash
+    npm run dev
+    ```
+
+    Then check the health endpoint:
+
+    ```bash
+    curl http://localhost:8787/healthz
+    ```
+
+    Expected response:
+
+    ```json
+    {
+      "ok": true,
+      "bucketAccessible": true
+    }
+    ```
+  </Step>
+
+  <Step title="Deploy to Cloudflare">
+    Deploy the Worker to your Cloudflare account.
+
+    ```bash
+    npm run deploy
+    ```
+
+    Wrangler prints the live URL after a successful deploy. Your remote MCP endpoint is:
+
+    ```text
+    https://<worker-name>.<account-subdomain>.workers.dev/mcp
+    ```
+  </Step>
+</Steps>
+
+## Exposed HTTP routes
+
+| Route | Description |
+|---|---|
+| `GET /healthz` | Health check; verifies the R2 bucket binding is accessible. Returns `{ "ok": true, "bucketAccessible": true }` on success. |
+| `* /mcp` | Model Context Protocol endpoint. Guarded by OAuth when `AUTH_MODE=github`; open when `AUTH_MODE=none`. |
+| `GET /authorize` | OAuth 2.0 authorization endpoint. Redirects to GitHub for login. Only active when `AUTH_MODE=github`. |
+| `GET /callback` | OAuth 2.0 callback endpoint. Exchanges the GitHub code for a session. Only active when `AUTH_MODE=github`. |
+| `POST /token` | OAuth 2.0 token endpoint. Issues access tokens after successful authorization. Only active when `AUTH_MODE=github`. |
+| `POST /register` | OAuth 2.0 dynamic client registration endpoint. Only active when `AUTH_MODE=github`. |
